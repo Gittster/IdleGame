@@ -12,22 +12,47 @@ landing, change this file rather than working around it per-asset.
 
 ## 1. Direction
 
-**Painted dark fantasy, semi-realistic proportions, moody and desaturated
-with saturated accents.** The same family as Path of Exile, Diablo, and
-Grim Dawn — not stylized/cartoon, not flat vector, not pixel art. Concretely:
+**Superseded 2026-09-01.** The original direction here was "painted dark
+fantasy" (see git history if you want it back). Current direction:
 
-- Digital painting rendering, visible brushwork, not photobashed and not a 3D render.
-- Desaturated, low-key base values (the world is dim, worn, overcast) with
-  color reserved for things that matter: player, enemies, loot, skill
-  effects, light sources.
-- Semi-realistic anatomy/proportions — grounded, not chibi, not
-  hyper-detailed anime.
-- Weight and grime: worn materials, dirt, rust, moss. Nothing pristine.
+**Deliberately crude/naive hand-drawn shapes, rendered sharp and clean.**
+Content is silly — simple wobbly outlines, the kind of thing you'd sketch
+in MS Paint or on a napkin — but the *execution* is crisp: clean
+anti-aliased edges, flat solid fills, no blur, no jpeg noise, no painterly
+texture. The joke is the contrast between "a kid could have drawn this"
+and "but it renders beautifully." Concretely:
 
-This direction was picked partly on merit and partly on fit for the
-pipeline: "dark fantasy digital painting" is one of the best-covered
-styles across every major image generator, so it's the direction most
-likely to give consistent, on-model results prompt after prompt.
+- **Thick, clean black (or near-black) outlines** around every shape —
+  the silhouette *is* the drawing, same as the reference sketches this
+  direction is built from.
+- **Flat solid fills.** No gradients, no shading, no brushwork, no
+  texture/grain. A shape is one or two flat colors plus its outline.
+- **Naive proportions on purpose** — wobbly, asymmetric, slightly-off
+  shapes read as charming here, not as a mistake to fix. Don't
+  "improve" a sketch's proportions into something more anatomically
+  correct; clean up its *line quality*, not its *design*.
+- **Crisp execution is not optional.** Blurry, low-res, or aliased edges
+  read as "bad," not "charming" — the charm is specifically naive
+  *content* rendered with clean *technique*. Vector-trace or
+  high-resolution-then-downsample rather than shipping something soft.
+
+## 1a. Sourcing: hand-drawn sketches, cleaned up directly — no external tool required
+
+Because the target look is already "simple line drawing," the best
+source material is an actual hand-drawn sketch (paint app, napkin photo,
+whatever) — paste or attach it directly. From there, cleanup happens
+without needing an external AI image generator or the `art-incoming` /
+manual-import round trip at all: trace it into clean flat shapes at the
+right canvas/format from `art/STYLE_GUIDE.md` §4, either as hand-authored
+SVG/Phaser Graphics code (cheapest, fully crisp at any resolution, no
+raster import needed) or as a cleaned-up raster PNG through
+`scripts/import-art-asset.mjs` when a traced vector isn't practical (a
+busier sketch with lots of independent regions).
+
+The `art-zone`/`art-character`/`art-enemy` skills' prompt-drafting mode
+(§6 below, "path B") still exists for when there's no sketch to work
+from and an external generator is more practical — but sketch-first is
+the default now.
 
 ## 2. Palette
 
@@ -60,25 +85,26 @@ to code, so this stays accurate.
 | Rare | `#f5d565` |
 | Unique | `#cc6633` |
 
-### 2c. Environment palette (the new part — proposed, tune freely)
+### 2c. Environment palette (open — the flat/naive direction doesn't force desaturation)
 
-Base world tones, kept desaturated so the functional/rarity colors above
-stay the things your eye jumps to:
+Under the old painted-dark-fantasy direction this table asked for muted,
+desaturated tones. That constraint doesn't automatically carry over to
+flat naive-line-art — bold, clearly-differentiated flat colors (à la
+*Baba Is You*) can suit the sillier tone better than muted ones. Treat
+these as a starting point, not a hard rule the way §2a/§2b are:
 
 | Role | Hex |
 |---|---|
-| Void / deep shadow | `#0a0a0d` (matches the current canvas background) |
-| Stone / ground, dark | `#1c1a17` |
-| Stone / ground, mid | `#3a352c` |
+| Void / deep background | `#0a0a0d` (matches the current canvas background) |
+| Ground, dark | `#1c1a17` |
+| Ground, mid | `#3a352c` |
 | Foliage, dark | `#23301f` |
 | Foliage, mid | `#445c34` |
-| Bone / dry parchment highlight | `#e8dfc8` (matches UI text — a deliberate echo) |
+| Bone / parchment highlight | `#e8dfc8` (matches UI text — a deliberate echo) |
 
-A generated piece should be expressible almost entirely in this table
-plus whichever functional/rarity colors it's actually depicting. If a
-prompt result is coming back colorful/saturated across the board, that's
-a style miss, not a "the model felt like it" — push the prompt harder on
-"desaturated," "low chroma," "muted."
+Whatever's actually used, stay consistent asset-to-asset — the point of
+a shared table is so a zone's props and its ground don't look like they
+came from different games.
 
 ## 3. Camera & construction rules
 
@@ -95,9 +121,10 @@ a style miss, not a "the model felt like it" — push the prompt harder on
   facing" at small size, in motion, possibly among several others of its
   own kind. Avoid thin/spindly shapes that disappear at gameplay zoom;
   keep the silhouette distinct from the ground plane behind it.
-- **Light source**: implied soft top-down light, consistent across a
-  single generation batch (don't mix a harshly side-lit piece with a
-  flat-lit one in the same set).
+- **Flat shading, no light source.** No gradients, no cast shadows baked
+  into the art itself, no ambient occlusion. A shape's color reads the
+  same everywhere on its surface — depth and readability come from the
+  outline and silhouette, not from rendered lighting.
 
 ## 4. Technical specs
 
@@ -126,12 +153,21 @@ is referenced by game code.
 
 ## 6. Workflow
 
+**Path A — sketch-first (default now, see §1a).** Attach/paste a hand
+sketch directly in conversation. Claude traces it into a clean flat
+asset (hand-authored SVG/Graphics code, or a cleaned raster PNG via
+`scripts/import-art-asset.mjs`) at the spec in §4, and wires it in —
+no `art/incoming` round trip needed unless a raster cleanup pass is
+actually useful for a particular sketch.
+
+**Path B — prompt-drafting for an external tool**, for when there's no
+sketch to start from:
+
 1. Run the relevant generation skill (`art-zone`, `art-character`, or
    `art-enemy`) with a verbal description (and/or a reference image).
    It reads this file and hands you back a ready-to-paste prompt, and
    logs it to `art/prompts/`.
-2. Run that prompt in whatever image tool you're using (Midjourney,
-   ChatGPT, etc.).
+2. Run that prompt in whatever image tool you're using.
 3. Save the result into `art/incoming/`.
 4. Run the `art-import` skill on that file. It trims/resizes/validates
    against the technical spec above, writes the processed file into
