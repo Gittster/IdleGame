@@ -2,6 +2,7 @@ import { useState, useSyncExternalStore, type CSSProperties } from 'react';
 import { playerProgress } from '../game/state/session';
 import { sceneBridge } from '../game/state/sceneBridge';
 import { clearSavedProgress } from '../game/state/persistence';
+import { isDevModeEnabled, disableDevMode } from '../game/state/devMode';
 import { ZONES } from '../data/zones';
 import { ITEMS } from '../data/items';
 import { BUILDINGS, type BuildingDef } from '../data/buildings';
@@ -33,7 +34,7 @@ export function App() {
     <>
       <GoldPill gold={progress.gold} />
       {screen === 'town' && <TownPanel progress={progress} />}
-      {import.meta.env.DEV && <DevPanel progress={progress} />}
+      {isDevModeEnabled && <DevPanel progress={progress} />}
     </>
   );
 }
@@ -290,6 +291,15 @@ function DevPanel({ progress }: { progress: ProgressSnapshot }) {
             }}
           >
             Reset Save (reload)
+          </button>
+          <button
+            style={{ ...devResetButtonStyle, marginTop: 6 }}
+            onClick={() => {
+              disableDevMode();
+              window.location.reload();
+            }}
+          >
+            Disable Dev Mode (reload)
           </button>
         </div>
       )}
