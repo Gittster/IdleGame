@@ -12,6 +12,7 @@ import { GAME_CONFIG } from '../config';
 
 const FIXED_DT = WORLD_TUNING.fixedDtMs / 1000;
 const SKILL_BUTTON_RADIUS = 34;
+const FULLSCREEN_BUTTON_RADIUS = 22;
 
 export class CombatScene extends Phaser.Scene {
   private world!: CombatWorld;
@@ -26,10 +27,12 @@ export class CombatScene extends Phaser.Scene {
   private debugText!: Phaser.GameObjects.Text;
 
   private skillButtonPos = { x: 0, y: 0 };
+  private skillButtonContainer!: Phaser.GameObjects.Container;
   private skillIcon!: Phaser.GameObjects.Arc;
   private skillCooldownText!: Phaser.GameObjects.Text;
 
-  private rotateOverlay?: Phaser.GameObjects.Container;
+  private fullscreenButtonPos = { x: 0, y: 0 };
+  private fullscreenButton?: Phaser.GameObjects.Text;
 
   private accumulator = 0;
   private hitStopRemainingMs = 0;
@@ -68,8 +71,8 @@ export class CombatScene extends Phaser.Scene {
     });
 
     this.buildHud();
-    this.buildRotateOverlay();
     this.wirePointerRouting();
+    this.scale.on('resize', () => this.repositionHud());
 
     this.input.keyboard!.on('keydown-T', () => this.stressTestBurst());
     this.input.keyboard!.on('keydown-Q', () => this.inputs.requestSkillCast(POWER_BOLT.id));
@@ -86,7 +89,11 @@ export class CombatScene extends Phaser.Scene {
   private wirePointerRouting(): void {
     this.input.on('pointerdown', (p: Phaser.Input.Pointer) => {
       if (this.inputs.resolveSkillTarget(p)) return;
-      if (this.isSkillButtonHit(p)) {
+      if (this.isWithin(p, this.fullscreenButtonPos, FULLSCREEN_BUTTON_RADIUS)) {
+        this.toggleFullscreen();
+        return;
+      }
+      if (this.isWithin(p, this.skillButtonPos, SKILL_BUTTON_RADIUS)) {
         this.inputs.requestSkillCast(POWER_BOLT.id);
         return;
       }
@@ -96,29 +103,29 @@ export class CombatScene extends Phaser.Scene {
     this.input.on('pointerup', (p: Phaser.Input.Pointer) => this.inputs.releaseJoystickTouch(p));
   }
 
-  private isSkillButtonHit(p: Phaser.Input.Pointer): boolean {
-    return Phaser.Math.Distance.Between(p.x, p.y, this.skillButtonPos.x, this.skillButtonPos.y) <= SKILL_BUTTON_RADIUS;
+  private isWithin(p: Phaser.Input.Pointer, pos: { x: number; y: number }, radius: number): boolean {
+    return Phaser.Math.Distance.Between(p.x, p.y, pos.x, pos.y) <= radius;
   }
 
-  private buildRotateOverlay(): void {
-    if (!this.inputs.isTouch) return;
-    const w = this.scale.width;
-    const h = this.scale.height;
-    const bg = this.add.rectangle(0, 0, w, h, 0x05050a, 0.96).setOrigin(0, 0);
-    const text = this.add
-      .text(w / 2, h / 2, 'Rotate your device to landscape to play', {
-        fontSize: '22px',
-        color: '#ffffff',
-        align: 'center',
-        wordWrap: { width: w * 0.7 },
-      })
-      .setOrigin(0.5);
-    this.rotateOverlay = this.add.container(0, 0, [bg, text]).setScrollFactor(0).setDepth(500);
+  private toggleFullscreen(): void {
+    if (this.scale.isFullscreen) this.scale.stopFullscreen();
+    else this.scale.startFullscreen();
+  }
 
-    const update = () => this.rotateOverlay!.setVisible(window.innerHeight > window.innerWidth);
-    update();
-    this.scale.on('resize', update);
-    window.addEventListener('orientationchange', update);
+  /** Repositions HUD elements anchored to the screen's edges after the
+   *  canvas resizes (rotation, or a mobile browser's chrome collapsing) —
+   *  RESIZE scale mode means scale.width/height genuinely change, unlike
+   *  the old fixed-resolution FIT setup. */
+  private repositionHud(): void {
+    const x = this.scale.width - 64;
+    const y = this.scale.height - 64;
+    this.skillButtonPos = { x, y };
+    this.skillButtonContainer.setPosition(x, y);
+
+    if (this.fullscreenButton) {
+      this.fullscreenButtonPos = this.fullscreenButtonCenter();
+      this.fullscreenButton.setPosition(this.fullscreenButtonPos.x, this.fullscreenButtonPos.y);
+    }
   }
 
   private spawnEnemyNear(px: number, py: number): void {
@@ -180,6 +187,7 @@ export class CombatScene extends Phaser.Scene {
       .setDepth(100);
 
     this.buildSkillButton();
+    this.buildFullscreenButton();
   }
 
   private buildSkillButton(): void {
@@ -187,16 +195,30 @@ export class CombatScene extends Phaser.Scene {
     const y = this.scale.height - 64;
     this.skillButtonPos = { x, y };
 
-    this.add.circle(x, y, SKILL_BUTTON_RADIUS, 0x000000, 0.35).setStrokeStyle(2, 0xffffff, 0.4).setScrollFactor(0).setDepth(149);
-    this.skillIcon = this.add
-      .circle(x, y, SKILL_BUTTON_RADIUS - 6, POWER_BOLT.tint, 0.95)
-      .setScrollFactor(0)
-      .setDepth(150);
+    const ring = this.add.circle(0, 0, SKILL_BUTTON_RADIUS, 0x000000, 0.35).setStrokeStyle(2, 0xffffff, 0.4);
+    this.skillIcon = this.add.circle(0, 0, SKILL_BUTTON_RADIUS - 6, POWER_BOLT.tint, 0.95);
     this.skillCooldownText = this.add
-      .text(x, y, '', { fontSize: '16px', color: '#ffffff', fontStyle: 'bold' })
+      .text(0, 0, '', { fontSize: '16px', color: '#ffffff', fontStyle: 'bold' })
+      .setOrigin(0.5);
+
+    this.skillButtonContainer = this.add
+      .container(x, y, [ring, this.skillIcon, this.skillCooldownText])
+      .setScrollFactor(0)
+      .setDepth(149);
+  }
+
+  private buildFullscreenButton(): void {
+    if (!this.sys.game.device.fullscreen.available) return;
+    this.fullscreenButtonPos = this.fullscreenButtonCenter();
+    this.fullscreenButton = this.add
+      .text(this.fullscreenButtonPos.x, this.fullscreenButtonPos.y, '⛶', { fontSize: '22px', color: '#ffffffcc' })
       .setOrigin(0.5)
       .setScrollFactor(0)
-      .setDepth(151);
+      .setDepth(150);
+  }
+
+  private fullscreenButtonCenter(): { x: number; y: number } {
+    return { x: this.scale.width - 16 - FULLSCREEN_BUTTON_RADIUS, y: 16 + FULLSCREEN_BUTTON_RADIUS };
   }
 
   update(_time: number, delta: number): void {

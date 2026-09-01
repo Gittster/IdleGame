@@ -20,6 +20,13 @@
         justify-content: center;
         width: 100vw;
         height: 100vh;
+        /* dvh/dvw track the *actual* visible viewport as a mobile browser's
+           address bar collapses/expands; 100vh alone leaves a stale gap
+           (or overflow) on phones until this is supported (all current
+           mobile browsers), so it's a progressive enhancement over the
+           vw/vh fallback above. */
+        width: 100dvw;
+        height: 100dvh;
         touch-action: none;
       }
       canvas {
