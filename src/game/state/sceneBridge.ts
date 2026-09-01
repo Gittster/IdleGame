@@ -10,6 +10,8 @@ export type Screen = 'combat' | 'town';
 class SceneBridge {
   private screen: Screen = 'combat';
   private enterZoneHandler: ((zoneId: string) => void) | null = null;
+  private goToTownHandler: (() => void) | null = null;
+  private fullscreenToggleHandler: (() => void) | null = null;
   private listeners = new Set<() => void>();
 
   getScreen(): Screen {
@@ -27,6 +29,27 @@ class SceneBridge {
 
   enterZone(zoneId: string): void {
     this.enterZoneHandler?.(zoneId);
+  }
+
+  /** Registered by CombatScene only — the HUD's "Town" button is combat-
+   *  only (the overlay hides it outside combat), so there's nothing to
+   *  clear when leaving combat. */
+  setGoToTownHandler(handler: (() => void) | null): void {
+    this.goToTownHandler = handler;
+  }
+
+  goToTown(): void {
+    this.goToTownHandler?.();
+  }
+
+  /** Registered by both CombatScene and TownScene on create — fullscreen
+   *  is available from either screen, unlike the Town button. */
+  setFullscreenToggleHandler(handler: (() => void) | null): void {
+    this.fullscreenToggleHandler = handler;
+  }
+
+  toggleFullscreen(): void {
+    this.fullscreenToggleHandler?.();
   }
 
   subscribe(listener: () => void): () => void {

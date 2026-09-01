@@ -1,10 +1,11 @@
 import { useEffect, useState, useSyncExternalStore, type CSSProperties, type ReactNode } from 'react';
 import { playerProgress } from '../game/state/session';
-import { sceneBridge } from '../game/state/sceneBridge';
+import { sceneBridge, type Screen } from '../game/state/sceneBridge';
 import { clearSavedProgress } from '../game/state/persistence';
 import { isDevModeEnabled, disableDevMode } from '../game/state/devMode';
 import { inventoryStore } from '../game/state/inventoryStore';
 import { settingsStore } from '../game/state/settingsStore';
+import { pauseStore } from '../game/state/pauseStore';
 import { ZONES } from '../data/zones';
 import { ITEMS } from '../data/items';
 import { BUILDINGS, type BuildingDef } from '../data/buildings';
@@ -39,16 +40,30 @@ export function App() {
     (cb) => settingsStore.subscribe(cb),
     () => settingsStore.isOpen()
   );
+  const paused = useSyncExternalStore(
+    (cb) => pauseStore.subscribe(cb),
+    () => pauseStore.isPaused()
+  );
 
-  // "I" toggles the Inventory overlay from anywhere (combat or town) —
-  // a window-level listener works uniformly across both scenes without
-  // needing a separate Phaser-side binding for Combat specifically.
+  // Global keybindings, handled once here rather than split between
+  // Phaser and React: "I" toggles Inventory (works the same in combat or
+  // town), Space pauses/unpauses combat specifically, and Escape toggles
+  // the Settings panel (which pauses combat on its own via isOpen()).
   useEffect(() => {
     const onKeyDown = (e: KeyboardEvent) => {
-      if (e.key.toLowerCase() !== 'i') return;
       const active = document.activeElement;
       if (active instanceof HTMLInputElement || active instanceof HTMLTextAreaElement) return;
-      inventoryStore.toggle();
+
+      if (e.key.toLowerCase() === 'i') {
+        inventoryStore.toggle();
+      } else if (e.key === ' ' || e.code === 'Space') {
+        // preventDefault always, not just when it pauses: a focused HUD
+        // button would otherwise also treat Space as "click me".
+        e.preventDefault();
+        if (sceneBridge.getScreen() === 'combat') pauseStore.toggle();
+      } else if (e.key === 'Escape') {
+        settingsStore.setOpen(!settingsStore.isOpen());
+      }
     };
     window.addEventListener('keydown', onKeyDown);
     return () => window.removeEventListener('keydown', onKeyDown);
@@ -59,40 +74,67 @@ export function App() {
   const showGold = screen !== 'town' || inventoryOpen;
 
   let modal: ReactNode = null;
-  if (settingsOpen) modal = <SettingsPanel />;
+  if (settingsOpen) modal = <SettingsPanel progress={progress} />;
   else if (inventoryOpen) modal = <InventoryPanel progress={progress} />;
   else if (screen === 'town') modal = <TownPanel progress={progress} />;
 
   return (
     <>
-      {showGold && <GoldPill gold={progress.gold} />}
-      <HudButtons inventoryOpen={inventoryOpen} settingsOpen={settingsOpen} />
+      <HudStack screen={screen} gold={progress.gold} showGold={showGold} inventoryOpen={inventoryOpen} settingsOpen={settingsOpen} />
+      {paused && !settingsOpen && screen === 'combat' && <PausedBanner />}
       {modal}
       {isDevModeEnabled && <DevPanel progress={progress} />}
     </>
   );
 }
 
-function GoldPill({ gold }: { gold: number }) {
-  return (
-    <div style={goldPillStyle}>Gold: {gold}</div>
-  );
-}
+const FULLSCREEN_AVAILABLE = typeof document !== 'undefined' && document.fullscreenEnabled;
 
-/** Small always-visible HUD buttons (Inventory, Settings) — visible over
- *  both Combat and Town, matching the request that both work "in town,
- *  and in zones for that matter." */
-function HudButtons({ inventoryOpen, settingsOpen }: { inventoryOpen: boolean; settingsOpen: boolean }) {
+/**
+ * Every top-right HUD chrome element (gold, fullscreen, town, inventory,
+ * settings) lives in one flex-column stack now, sized to content with a
+ * simple gap — a single source of truth for this corner's layout, so
+ * nothing can independently drift into overlapping something else the
+ * way the old mix of Phaser-positioned and React-positioned buttons did.
+ */
+function HudStack({
+  screen,
+  gold,
+  showGold,
+  inventoryOpen,
+  settingsOpen,
+}: {
+  screen: Screen;
+  gold: number;
+  showGold: boolean;
+  inventoryOpen: boolean;
+  settingsOpen: boolean;
+}) {
   return (
-    <div style={hudButtonStackStyle}>
+    <div style={hudStackStyle}>
+      {showGold && <div style={goldPillStyle}>Gold: {gold}</div>}
+      {FULLSCREEN_AVAILABLE && (
+        <button style={hudButtonStyle} onClick={() => sceneBridge.toggleFullscreen()}>
+          Fullscreen
+        </button>
+      )}
+      {screen === 'combat' && (
+        <button style={hudButtonStyle} onClick={() => sceneBridge.goToTown()}>
+          Town
+        </button>
+      )}
       <button style={hudButtonStyle} onClick={() => inventoryStore.toggle()}>
         {inventoryOpen ? 'Close Inventory' : 'Inventory [I]'}
       </button>
       <button style={hudButtonStyle} onClick={() => settingsStore.setOpen(!settingsOpen)}>
-        {settingsOpen ? 'Close Settings' : 'Settings'}
+        {settingsOpen ? 'Close Settings' : 'Settings [Esc]'}
       </button>
     </div>
   );
+}
+
+function PausedBanner() {
+  return <div style={pausedBannerStyle}>Paused — press Space to resume</div>;
 }
 
 function TownPanel({ progress }: { progress: ProgressSnapshot }) {
@@ -106,7 +148,17 @@ function TownPanel({ progress }: { progress: ProgressSnapshot }) {
       <div style={cardStyle}>
         <h1 style={titleStyle}>Town</h1>
 
-        <h2 style={sectionStyle}>Buildings</h2>
+        <div style={buildingsHeaderStyle}>
+          <h2 style={{ ...sectionStyle, margin: 0 }}>Buildings</h2>
+          <label style={inlineCheckboxStyle}>
+            <input
+              type="checkbox"
+              checked={hideCompletedUpgrades}
+              onChange={(e) => settingsStore.setHideCompletedUpgrades(e.target.checked)}
+            />
+            <span>Hide completed upgrades</span>
+          </label>
+        </div>
         <div style={{ display: 'flex', flexDirection: 'column', gap: 10, marginBottom: 12 }}>
           {Object.values(BUILDINGS).map((building) => (
             <BuildingCard key={building.id} building={building} progress={progress} hideCompletedUpgrades={hideCompletedUpgrades} />
@@ -175,14 +227,13 @@ function InventoryPanel({ progress }: { progress: ProgressSnapshot }) {
   );
 }
 
-/** Combat Settings — reachable via the Settings HUD button in both Combat
- *  (where opening it also pauses the sim, see CombatScene.update) and
- *  Town. Just the one preference so far; more settings land here later. */
-function SettingsPanel() {
-  const hideCompletedUpgrades = useSyncExternalStore(
-    (cb) => settingsStore.subscribe(cb),
-    () => settingsStore.getHideCompletedUpgrades()
-  );
+/** Combat Settings — reachable via the Settings HUD button (or Escape)
+ *  from both Combat, where opening it also pauses the sim (see
+ *  CombatScene.update), and Town. Houses ongoing on/off toggles like
+ *  Auto-Targeting, as opposed to one-time purchases which stay listed
+ *  under their building in Town. */
+function SettingsPanel({ progress }: { progress: ProgressSnapshot }) {
+  const autoTargetingOwned = progress.unlockedUpgrades.includes('auto-targeting');
 
   return (
     <div style={overlayStyle}>
@@ -194,14 +245,18 @@ function SettingsPanel() {
           </button>
         </div>
 
-        <label style={zoneRowStyle}>
-          <span>Hide completed upgrades</span>
-          <input
-            type="checkbox"
-            checked={hideCompletedUpgrades}
-            onChange={(e) => settingsStore.setHideCompletedUpgrades(e.target.checked)}
-          />
-        </label>
+        {autoTargetingOwned ? (
+          <label style={zoneRowStyle}>
+            <span>Auto-Targeting</span>
+            <input
+              type="checkbox"
+              checked={progress.autoTargetEnabled}
+              onChange={(e) => playerProgress.setAutoTarget(e.target.checked)}
+            />
+          </label>
+        ) : (
+          <p style={subtleStyle}>Unlock Auto-Targeting at The Factory to enable it here.</p>
+        )}
       </div>
     </div>
   );
@@ -242,12 +297,7 @@ function BuildingCard({
 }) {
   const unlocked = progress.unlockedBuildings.includes(building.id);
   const allUpgrades = Object.values(UPGRADES).filter((u) => u.building === building.id);
-  // Auto-Targeting (and anything else with an ongoing on/off toggle, not
-  // just a one-time purchase) stays visible even when hiding "completed"
-  // upgrades — hiding it would hide its only way to be switched off again.
-  const visibleUpgrades = hideCompletedUpgrades
-    ? allUpgrades.filter((u) => u.effect.kind === 'autoTargeting' || !progress.unlockedUpgrades.includes(u.id))
-    : allUpgrades;
+  const visibleUpgrades = hideCompletedUpgrades ? allUpgrades.filter((u) => !progress.unlockedUpgrades.includes(u.id)) : allUpgrades;
   const canUnlock = playerProgress.canAfford(building.unlockCost);
 
   return (
@@ -279,7 +329,6 @@ function BuildingCard({
 function UpgradeRow({ upgrade, progress }: { upgrade: UpgradeDef; progress: ProgressSnapshot }) {
   const owned = progress.unlockedUpgrades.includes(upgrade.id);
   const affordable = playerProgress.canAfford(upgrade.cost);
-  const isAutoTargeting = upgrade.effect.kind === 'autoTargeting';
 
   return (
     <div style={zoneRowStyle}>
@@ -288,18 +337,7 @@ function UpgradeRow({ upgrade, progress }: { upgrade: UpgradeDef; progress: Prog
         <div style={upgradeDescStyle}>{upgrade.description}</div>
       </div>
       {owned ? (
-        isAutoTargeting ? (
-          <label style={inlineToggleStyle}>
-            <span style={ownedLabelStyle}>{progress.autoTargetEnabled ? 'On' : 'Off'}</span>
-            <input
-              type="checkbox"
-              checked={progress.autoTargetEnabled}
-              onChange={(e) => playerProgress.setAutoTarget(e.target.checked)}
-            />
-          </label>
-        ) : (
-          <span style={ownedLabelStyle}>Owned</span>
-        )
+        <span style={ownedLabelStyle}>Owned</span>
       ) : (
         <button style={buttonStyle(affordable)} disabled={!affordable} onClick={() => playerProgress.purchaseUpgrade(upgrade.id, upgrade.cost)}>
           {formatCost(upgrade.cost)}
@@ -496,10 +534,20 @@ const buildingDescStyle: CSSProperties = { fontSize: 12, opacity: 0.7, marginTop
 const upgradeDescStyle: CSSProperties = { fontSize: 11, opacity: 0.65, marginTop: 2, maxWidth: 340 };
 const ownedLabelStyle: CSSProperties = { fontSize: 12, opacity: 0.6 };
 
-const inlineToggleStyle: CSSProperties = {
+const buildingsHeaderStyle: CSSProperties = {
+  display: 'flex',
+  alignItems: 'center',
+  justifyContent: 'space-between',
+  gap: 12,
+  margin: '16px 0 8px',
+};
+
+const inlineCheckboxStyle: CSSProperties = {
   display: 'flex',
   alignItems: 'center',
   gap: 6,
+  fontSize: 12,
+  opacity: 0.75,
   cursor: 'pointer',
 };
 
@@ -521,10 +569,18 @@ const closeButtonStyle: CSSProperties = {
   fontSize: 12,
 };
 
-const goldPillStyle: CSSProperties = {
+const hudStackStyle: CSSProperties = {
   position: 'fixed',
   top: 12,
   right: 12,
+  zIndex: 15,
+  display: 'flex',
+  flexDirection: 'column',
+  gap: 6,
+  alignItems: 'flex-end',
+};
+
+const goldPillStyle: CSSProperties = {
   pointerEvents: 'none',
   background: 'rgba(0,0,0,0.55)',
   border: '1px solid rgba(232,217,168,0.4)',
@@ -535,16 +591,6 @@ const goldPillStyle: CSSProperties = {
   fontSize: 13,
   letterSpacing: '0.05em',
   textTransform: 'uppercase',
-};
-
-const hudButtonStackStyle: CSSProperties = {
-  position: 'fixed',
-  top: 46,
-  right: 12,
-  display: 'flex',
-  flexDirection: 'column',
-  gap: 6,
-  alignItems: 'flex-end',
 };
 
 const hudButtonStyle: CSSProperties = {
@@ -558,6 +604,20 @@ const hudButtonStyle: CSSProperties = {
   fontSize: 12,
   cursor: 'pointer',
   whiteSpace: 'nowrap',
+};
+
+const pausedBannerStyle: CSSProperties = {
+  position: 'fixed',
+  top: '40%',
+  left: '50%',
+  transform: 'translate(-50%, -50%)',
+  pointerEvents: 'none',
+  fontFamily: 'Cinzel, serif',
+  fontSize: 28,
+  letterSpacing: '0.08em',
+  textTransform: 'uppercase',
+  color: '#e8d9a8',
+  textShadow: '0 2px 12px rgba(0,0,0,0.8)',
 };
 
 const devWrapStyle: CSSProperties = {

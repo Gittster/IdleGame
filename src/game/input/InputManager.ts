@@ -30,7 +30,6 @@ export class InputManager {
     LEFT: Phaser.Input.Keyboard.Key;
     DOWN: Phaser.Input.Keyboard.Key;
     RIGHT: Phaser.Input.Keyboard.Key;
-    SPACE: Phaser.Input.Keyboard.Key;
   };
 
   readonly isTouch: boolean;
@@ -43,7 +42,7 @@ export class InputManager {
   constructor(scene: Phaser.Scene) {
     this.scene = scene;
     const kb = scene.input.keyboard!;
-    this.keys = kb.addKeys('W,A,S,D,UP,LEFT,DOWN,RIGHT,SPACE') as unknown as typeof this.keys;
+    this.keys = kb.addKeys('W,A,S,D,UP,LEFT,DOWN,RIGHT') as unknown as typeof this.keys;
 
     this.isTouch = isMobileDevice(scene);
     if (this.isTouch) {
@@ -68,7 +67,9 @@ export class InputManager {
 
   get firing(): boolean {
     if (this.isTouch) return this.aimStick!.active;
-    return this.scene.input.activePointer.leftButtonDown() || this.keys.SPACE.isDown;
+    // Space is the pause key (see App.tsx's global keydown handler) —
+    // mouse click is the only desktop fire trigger now.
+    return this.scene.input.activePointer.leftButtonDown();
   }
 
   /**

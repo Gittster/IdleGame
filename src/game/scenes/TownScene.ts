@@ -22,6 +22,11 @@ export class TownScene extends Phaser.Scene {
 
     sceneBridge.setScreen('town');
     sceneBridge.setEnterZoneHandler((zoneId) => this.scene.start('Combat', { zoneId }));
+    sceneBridge.setGoToTownHandler(null); // no "back to town" button while already in Town
+    sceneBridge.setFullscreenToggleHandler(() => {
+      if (this.scale.isFullscreen) this.scale.stopFullscreen();
+      else this.scale.startFullscreen();
+    });
 
     this.scale.on('resize', () => this.title.setX(this.scale.width / 2));
   }

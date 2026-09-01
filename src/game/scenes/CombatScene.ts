@@ -14,11 +14,10 @@ import { TEXT_STYLES } from '../ui/theme';
 import { playerProgress } from '../state/session';
 import { sceneBridge } from '../state/sceneBridge';
 import { settingsStore } from '../state/settingsStore';
+import { pauseStore } from '../state/pauseStore';
 
 const FIXED_DT = WORLD_TUNING.fixedDtMs / 1000;
 const SKILL_BUTTON_RADIUS = 34;
-const FULLSCREEN_BUTTON_RADIUS = 22;
-const TOWN_BUTTON_RADIUS = 30;
 const MAX_ENEMY_INDICATORS = 14;
 const INDICATOR_EDGE_MARGIN = 28;
 const OBSTACLE_FILL = 0x8a8578;
@@ -46,12 +45,6 @@ export class CombatScene extends Phaser.Scene {
   private skillIcon!: Phaser.GameObjects.Arc;
   private skillCooldownText!: Phaser.GameObjects.Text;
 
-  private fullscreenButtonPos = { x: 0, y: 0 };
-  private fullscreenButton?: Phaser.GameObjects.Text;
-
-  private townButtonPos = { x: 0, y: 0 };
-  private townButton!: Phaser.GameObjects.Text;
-
   private accumulator = 0;
   private hitStopRemainingMs = 0;
   /** Preserves facing when the aim input is momentarily neutral (e.g. a
@@ -66,6 +59,11 @@ export class CombatScene extends Phaser.Scene {
     const zone = (data.zoneId && ZONES[data.zoneId]) || FIRST_ZONE;
     this.world = new CombatWorld(zone, playerProgress);
     sceneBridge.setScreen('combat');
+    sceneBridge.setGoToTownHandler(() => this.goToTown());
+    sceneBridge.setFullscreenToggleHandler(() => {
+      if (this.scale.isFullscreen) this.scale.stopFullscreen();
+      else this.scale.startFullscreen();
+    });
     this.inputs = new InputManager(this);
     this.juice = new Juice(this, 'tex-spark');
 
@@ -135,14 +133,6 @@ export class CombatScene extends Phaser.Scene {
   private wirePointerRouting(): void {
     this.input.on('pointerdown', (p: Phaser.Input.Pointer) => {
       if (this.inputs.resolveSkillTarget(p)) return;
-      if (this.isWithin(p, this.fullscreenButtonPos, FULLSCREEN_BUTTON_RADIUS)) {
-        this.toggleFullscreen();
-        return;
-      }
-      if (this.isWithin(p, this.townButtonPos, TOWN_BUTTON_RADIUS)) {
-        this.goToTown();
-        return;
-      }
       if (this.isWithin(p, this.skillButtonPos, SKILL_BUTTON_RADIUS)) {
         this.inputs.requestSkillCast(POWER_BOLT.id);
         return;
@@ -157,11 +147,6 @@ export class CombatScene extends Phaser.Scene {
     return Phaser.Math.Distance.Between(p.x, p.y, pos.x, pos.y) <= radius;
   }
 
-  private toggleFullscreen(): void {
-    if (this.scale.isFullscreen) this.scale.stopFullscreen();
-    else this.scale.startFullscreen();
-  }
-
   /** Repositions HUD elements anchored to the screen's edges after the
    *  canvas resizes (rotation, or a mobile browser's chrome collapsing) —
    *  RESIZE scale mode means scale.width/height genuinely change, unlike
@@ -169,15 +154,6 @@ export class CombatScene extends Phaser.Scene {
   private repositionHud(): void {
     this.skillButtonPos = this.skillButtonCenter();
     this.skillButtonContainer.setPosition(this.skillButtonPos.x, this.skillButtonPos.y);
-
-    if (this.fullscreenButton) {
-      this.fullscreenButtonPos = this.fullscreenButtonCenter();
-      this.fullscreenButton.setPosition(this.fullscreenButtonPos.x, this.fullscreenButtonPos.y);
-    }
-
-    this.townButtonPos = this.townButtonCenter();
-    this.townButton.setPosition(this.townButtonPos.x, this.townButtonPos.y);
-
     this.zoneBanner.setPosition(this.scale.width / 2, this.scale.height / 2);
   }
 
@@ -257,8 +233,8 @@ export class CombatScene extends Phaser.Scene {
       .setDepth(100);
 
     const instructions = this.inputs.isTouch
-      ? 'left stick: move · right stick: aim & fire\ntap the skill icon, then tap a target · tap TOWN to head back'
-      : 'WASD move · mouse aim · click/space fire\nQ or click the skill icon to cast at cursor · T = stress test · TOWN to head back';
+      ? 'left stick: move · right stick: aim & fire\ntap the skill icon, then tap a target'
+      : 'WASD move · mouse aim · click fire\nQ or click the skill icon to cast at cursor · T = stress test\nI = inventory · Space = pause · Esc = settings';
     const instructionsText = this.add
       .text(16, this.zoneStatusText.y + this.zoneStatusText.height + 6, instructions, { ...TEXT_STYLES.bodyMuted, fontSize: '12px' })
       .setScrollFactor(0)
@@ -277,8 +253,6 @@ export class CombatScene extends Phaser.Scene {
       .setVisible(false);
 
     this.buildSkillButton();
-    this.buildFullscreenButton();
-    this.buildTownButton();
   }
 
   private buildSkillButton(): void {
@@ -294,46 +268,10 @@ export class CombatScene extends Phaser.Scene {
       .setDepth(149);
   }
 
-  private buildFullscreenButton(): void {
-    if (!this.sys.game.device.fullscreen.available) return;
-    this.fullscreenButtonPos = this.fullscreenButtonCenter();
-    this.fullscreenButton = this.add
-      .text(this.fullscreenButtonPos.x, this.fullscreenButtonPos.y, '⛶', { ...TEXT_STYLES.body, fontSize: '22px', shadow: undefined })
-      .setOrigin(0.5)
-      .setScrollFactor(0)
-      .setDepth(150);
-  }
-
-  private fullscreenButtonCenter(): { x: number; y: number } {
-    return { x: this.scale.width - 16 - FULLSCREEN_BUTTON_RADIUS, y: 16 + FULLSCREEN_BUTTON_RADIUS };
-  }
-
-  /** Always visible (unlike the fullscreen toggle, which needs browser
-   *  support) — a manual way back to Town without waiting for a full zone
-   *  clear, so cashing in loot mid-run doesn't require dying or grinding
-   *  out the whole kill quota. */
-  private buildTownButton(): void {
-    this.townButtonPos = this.townButtonCenter();
-    this.townButton = this.add
-      .text(this.townButtonPos.x, this.townButtonPos.y, 'TOWN', {
-        ...TEXT_STYLES.bodyMuted,
-        fontSize: '12px',
-        backgroundColor: '#00000080',
-        padding: { x: 8, y: 4 },
-      })
-      .setOrigin(0.5)
-      .setScrollFactor(0)
-      .setDepth(150);
-  }
-
-  private townButtonCenter(): { x: number; y: number } {
-    return { x: this.scale.width - 16 - TOWN_BUTTON_RADIUS, y: 16 + FULLSCREEN_BUTTON_RADIUS * 2 + 24 };
-  }
-
   update(_time: number, delta: number): void {
-    // Frozen while the Combat Settings panel is open (its own pause
-    // button) — the frame just holds, same as any pause menu.
-    if (settingsStore.isOpen()) return;
+    // Frozen while the Combat Settings panel is open, or Space-paused —
+    // the frame just holds, same as any pause menu.
+    if (settingsStore.isOpen() || pauseStore.isPaused()) return;
 
     if (this.hitStopRemainingMs > 0) {
       this.hitStopRemainingMs -= delta;
