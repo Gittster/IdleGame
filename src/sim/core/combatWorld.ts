@@ -211,7 +211,7 @@ export class CombatWorld {
         vx: dirX * BASIC_ATTACK_TUNING.projectileSpeed,
         vy: dirY * BASIC_ATTACK_TUNING.projectileSpeed,
         radius: BASIC_ATTACK_TUNING.projectileRadius,
-        damage: BASIC_ATTACK_TUNING.damage,
+        damage: BASIC_ATTACK_TUNING.damage + attackDamageBonus(this.progress),
         life: BASIC_ATTACK_TUNING.projectileLife,
         team: Team.Player,
         pierce: BASIC_ATTACK_TUNING.pierce,
@@ -545,6 +545,19 @@ function maxHpBonus(progress: PlayerProgress): number {
   for (const id of progress.unlockedUpgrades) {
     const upgrade = UPGRADES[id];
     if (upgrade?.effect.kind === 'maxHpFlat') bonus += upgrade.effect.amount;
+  }
+  return bonus;
+}
+
+/** Sum of every owned Crafting Bench upgrade's flat basic-attack-damage
+ *  bonus. Recomputed per shot rather than cached, same as
+ *  skillDamageMultiplier — cheap at this upgrade count even at the basic
+ *  attack's fire rate. */
+function attackDamageBonus(progress: PlayerProgress): number {
+  let bonus = 0;
+  for (const id of progress.unlockedUpgrades) {
+    const upgrade = UPGRADES[id];
+    if (upgrade?.effect.kind === 'attackDamageFlat') bonus += upgrade.effect.amount;
   }
   return bonus;
 }

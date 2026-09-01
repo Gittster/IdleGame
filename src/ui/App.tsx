@@ -6,12 +6,13 @@ import { isDevModeEnabled, disableDevMode } from '../game/state/devMode';
 import { inventoryStore } from '../game/state/inventoryStore';
 import { settingsStore } from '../game/state/settingsStore';
 import { pauseStore } from '../game/state/pauseStore';
+import { townNavStore, type TownView } from '../game/state/townNavStore';
 import { ZONES } from '../data/zones';
-import { ITEMS } from '../data/items';
-import { BUILDINGS, type BuildingDef } from '../data/buildings';
-import type { Cost } from '../data/buildings';
+import { ITEMS, type ItemDef } from '../data/items';
+import { BUILDINGS } from '../data/buildings';
+import type { Cost, BuildingId } from '../data/buildings';
 import { UPGRADES, type UpgradeDef } from '../data/upgrades';
-import type { ProgressSnapshot } from '../sim/core/playerProgress';
+import type { ProgressSnapshot, ShipState } from '../sim/core/playerProgress';
 import type { ItemStack } from '../sim/core/inventory';
 
 const EXPAND_SLOTS = 4;
@@ -44,6 +45,10 @@ export function App() {
     (cb) => pauseStore.subscribe(cb),
     () => pauseStore.isPaused()
   );
+  const townView = useSyncExternalStore(
+    (cb) => townNavStore.subscribe(cb),
+    () => townNavStore.getView()
+  );
 
   // Global keybindings, handled once here rather than split between
   // Phaser and React: "I" toggles Inventory (works the same in combat or
@@ -69,9 +74,10 @@ export function App() {
     return () => window.removeEventListener('keydown', onKeyDown);
   }, []);
 
-  // Gold's only hidden case is Town's default view — it reappears the
-  // moment the Inventory overlay is open, in combat or in town.
-  const showGold = screen !== 'town' || inventoryOpen;
+  // Gold/Supplies hide only on Town's decluttered home screen — every
+  // sub-page (a building, Trading, Zones), Combat, and the Inventory
+  // overlay all show them, since a balance is directly relevant there.
+  const showGold = screen !== 'town' || inventoryOpen || townView !== 'home';
 
   let modal: ReactNode = null;
   if (settingsOpen) modal = <SettingsPanel progress={progress} />;
@@ -80,7 +86,14 @@ export function App() {
 
   return (
     <>
-      <HudStack screen={screen} gold={progress.gold} showGold={showGold} inventoryOpen={inventoryOpen} settingsOpen={settingsOpen} />
+      <HudStack
+        screen={screen}
+        gold={progress.gold}
+        supplies={progress.supplies}
+        showGold={showGold}
+        inventoryOpen={inventoryOpen}
+        settingsOpen={settingsOpen}
+      />
       {paused && !settingsOpen && screen === 'combat' && <PausedBanner />}
       {modal}
       {isDevModeEnabled && <DevPanel progress={progress} />}
@@ -100,12 +113,14 @@ const FULLSCREEN_AVAILABLE = typeof document !== 'undefined' && document.fullscr
 function HudStack({
   screen,
   gold,
+  supplies,
   showGold,
   inventoryOpen,
   settingsOpen,
 }: {
   screen: Screen;
   gold: number;
+  supplies: number;
   showGold: boolean;
   inventoryOpen: boolean;
   settingsOpen: boolean;
@@ -113,6 +128,7 @@ function HudStack({
   return (
     <div style={hudStackStyle}>
       {showGold && <div style={goldPillStyle}>Gold: {gold}</div>}
+      {showGold && <div style={goldPillStyle}>Supplies: {supplies}</div>}
       {FULLSCREEN_AVAILABLE && (
         <button style={hudButtonStyle} onClick={() => sceneBridge.toggleFullscreen()}>
           Fullscreen
@@ -137,35 +153,138 @@ function PausedBanner() {
   return <div style={pausedBannerStyle}>Paused — press Space to resume</div>;
 }
 
+/**
+ * Town is a small hub-and-spoke router rather than one long stacked
+ * panel: a home screen of nav tiles (one per building, plus Trading and
+ * Zones), each opening its own dedicated sub-page with a back button.
+ * Adding another mechanic later means adding another tile + page, not
+ * finding room in an ever-growing single list. The current sub-page
+ * lives in townNavStore rather than local state — see that file for why.
+ */
 function TownPanel({ progress }: { progress: ProgressSnapshot }) {
+  const view = useSyncExternalStore(
+    (cb) => townNavStore.subscribe(cb),
+    () => townNavStore.getView()
+  );
+  const onBack = () => townNavStore.setView('home');
+
+  if (view === 'zones') return <ZonesView progress={progress} onBack={onBack} />;
+  if (view === 'trading') return <TradingPostView progress={progress} onBack={onBack} />;
+  if (view !== 'home') return <BuildingView buildingId={view} progress={progress} onBack={onBack} />;
+  return <TownHome progress={progress} onNavigate={(v) => townNavStore.setView(v)} />;
+}
+
+function TownHome({ progress, onNavigate }: { progress: ProgressSnapshot; onNavigate: (view: TownView) => void }) {
+  return (
+    <div style={overlayStyle}>
+      <div style={{ ...cardStyle, width: 'min(640px, 94vw)' }}>
+        <h1 style={titleStyle}>Town</h1>
+        <div style={navGridStyle}>
+          {Object.values(BUILDINGS).map((building) => (
+            <NavTile
+              key={building.id}
+              title={building.name}
+              subtitle={building.description}
+              badge={progress.unlockedBuildings.includes(building.id) ? undefined : 'Locked'}
+              onClick={() => onNavigate(building.id)}
+            />
+          ))}
+          <NavTile
+            title="The Trading Post"
+            subtitle="Send ships out with drops, trade for supplies."
+            badge={tradingBadge(progress.ships)}
+            onClick={() => onNavigate('trading')}
+          />
+          <NavTile title="Zones" subtitle="Choose where to fight." onClick={() => onNavigate('zones')} />
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function tradingBadge(ships: readonly ShipState[]): string | undefined {
+  const atSea = ships.filter((s) => s.status === 'at_sea').length;
+  return atSea > 0 ? `${atSea} ship${atSea === 1 ? '' : 's'} at sea` : undefined;
+}
+
+function NavTile({ title, subtitle, badge, onClick }: { title: string; subtitle: string; badge?: string; onClick: () => void }) {
+  return (
+    <button style={navTileStyle} onClick={onClick}>
+      <div style={navTileTitleStyle}>{title}</div>
+      <div style={navTileSubtitleStyle}>{subtitle}</div>
+      {badge && <div style={navTileBadgeStyle}>{badge}</div>}
+    </button>
+  );
+}
+
+function BuildingView({ buildingId, progress, onBack }: { buildingId: BuildingId; progress: ProgressSnapshot; onBack: () => void }) {
+  const building = BUILDINGS[buildingId];
+  const unlocked = progress.unlockedBuildings.includes(building.id);
+  const canUnlock = playerProgress.canAfford(building.unlockCost);
   const hideCompletedUpgrades = useSyncExternalStore(
     (cb) => settingsStore.subscribe(cb),
     () => settingsStore.getHideCompletedUpgrades()
   );
+  const allUpgrades = Object.values(UPGRADES).filter((u) => u.building === building.id);
+  const visibleUpgrades = hideCompletedUpgrades ? allUpgrades.filter((u) => !progress.unlockedUpgrades.includes(u.id)) : allUpgrades;
 
   return (
     <div style={overlayStyle}>
       <div style={cardStyle}>
-        <h1 style={titleStyle}>Town</h1>
-
-        <div style={buildingsHeaderStyle}>
-          <h2 style={{ ...sectionStyle, margin: 0 }}>Buildings</h2>
-          <label style={inlineCheckboxStyle}>
-            <input
-              type="checkbox"
-              checked={hideCompletedUpgrades}
-              onChange={(e) => settingsStore.setHideCompletedUpgrades(e.target.checked)}
-            />
-            <span>Hide completed upgrades</span>
-          </label>
+        <div style={modalHeaderStyle}>
+          <h1 style={titleStyle}>{building.name}</h1>
+          <button style={closeButtonStyle} onClick={onBack}>
+            ← Town
+          </button>
         </div>
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 10, marginBottom: 12 }}>
-          {Object.values(BUILDINGS).map((building) => (
-            <BuildingCard key={building.id} building={building} progress={progress} hideCompletedUpgrades={hideCompletedUpgrades} />
-          ))}
-        </div>
+        <p style={subtleStyle}>{building.description}</p>
 
-        <h2 style={sectionStyle}>Zones</h2>
+        {!unlocked && (
+          <button
+            style={buttonStyle(canUnlock)}
+            disabled={!canUnlock}
+            onClick={() => playerProgress.unlockBuilding(building.id, building.unlockCost)}
+          >
+            Unlock — {formatCost(building.unlockCost)}
+          </button>
+        )}
+
+        {unlocked && (
+          <>
+            <div style={buildingsHeaderStyle}>
+              <h2 style={{ ...sectionStyle, margin: 0 }}>Upgrades</h2>
+              <label style={inlineCheckboxStyle}>
+                <input
+                  type="checkbox"
+                  checked={hideCompletedUpgrades}
+                  onChange={(e) => settingsStore.setHideCompletedUpgrades(e.target.checked)}
+                />
+                <span>Hide completed upgrades</span>
+              </label>
+            </div>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+              {visibleUpgrades.map((upgrade) => (
+                <UpgradeRow key={upgrade.id} upgrade={upgrade} progress={progress} />
+              ))}
+              {visibleUpgrades.length === 0 && <span style={upgradeDescStyle}>All upgrades owned.</span>}
+            </div>
+          </>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function ZonesView({ progress, onBack }: { progress: ProgressSnapshot; onBack: () => void }) {
+  return (
+    <div style={overlayStyle}>
+      <div style={cardStyle}>
+        <div style={modalHeaderStyle}>
+          <h1 style={titleStyle}>Zones</h1>
+          <button style={closeButtonStyle} onClick={onBack}>
+            ← Town
+          </button>
+        </div>
         <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
           {Object.values(ZONES).map((zone) => {
             const unlocked = progress.unlockedZoneIds.includes(zone.id);
@@ -180,6 +299,120 @@ function TownPanel({ progress }: { progress: ProgressSnapshot }) {
           })}
         </div>
       </div>
+    </div>
+  );
+}
+
+/** Trading Post: dock/at-sea ships, each either ready to load with a
+ *  drop-item + quantity, or showing a live countdown to its return. A
+ *  1s tick keeps that countdown fresh and, while any ship is at sea,
+ *  also calls resolveDueShips() so a completed voyage credits Supplies
+ *  the moment this panel is open to see it (the autosave interval
+ *  handles it anyway when the panel isn't open). */
+function TradingPostView({ progress, onBack }: { progress: ProgressSnapshot; onBack: () => void }) {
+  const [, setTick] = useState(0);
+  const hasShipAtSea = progress.ships.some((s) => s.status === 'at_sea');
+
+  useEffect(() => {
+    if (!hasShipAtSea) return;
+    const id = setInterval(() => {
+      playerProgress.resolveDueShips();
+      setTick((t) => t + 1);
+    }, 1000);
+    return () => clearInterval(id);
+  }, [hasShipAtSea]);
+
+  const tradableItems = Object.values(ITEMS).filter((item) => progress.slots.some((slot) => slot?.itemId === item.id && slot.qty > 0));
+
+  return (
+    <div style={overlayStyle}>
+      <div style={cardStyle}>
+        <div style={modalHeaderStyle}>
+          <h1 style={titleStyle}>Trading Post</h1>
+          <button style={closeButtonStyle} onClick={onBack}>
+            ← Town
+          </button>
+        </div>
+        <p style={subtleStyle}>Supplies: {progress.supplies}</p>
+
+        <h2 style={sectionStyle}>Ships</h2>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+          {progress.ships.map((ship, i) => (
+            <ShipRow key={i} ship={ship} shipIndex={i} tradableItems={tradableItems} progress={progress} />
+          ))}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function ShipRow({
+  ship,
+  shipIndex,
+  tradableItems,
+  progress,
+}: {
+  ship: ShipState;
+  shipIndex: number;
+  tradableItems: ItemDef[];
+  progress: ProgressSnapshot;
+}) {
+  const [selectedItemId, setSelectedItemId] = useState(tradableItems[0]?.id ?? '');
+  const [qty, setQty] = useState(1);
+
+  if (ship.status === 'at_sea') {
+    const remainingS = Math.max(0, Math.ceil((ship.returnAt - Date.now()) / 1000));
+    const cargoName = ITEMS[ship.cargoItemId]?.name ?? ship.cargoItemId;
+    return (
+      <div style={shipRowStyle}>
+        <div>
+          Ship {shipIndex + 1} — at sea with {ship.cargoQty} {cargoName}
+        </div>
+        <div style={ownedLabelStyle}>{remainingS > 0 ? `Returns in ${remainingS}s` : 'Returning...'}</div>
+      </div>
+    );
+  }
+
+  const have = selectedItemId
+    ? progress.slots.reduce((sum, slot) => (slot && slot.itemId === selectedItemId ? sum + slot.qty : sum), 0)
+    : 0;
+  const clampedQty = Math.min(Math.max(1, qty), Math.max(1, have));
+  const canSend = tradableItems.length > 0 && have > 0 && clampedQty <= have;
+
+  return (
+    <div style={shipRowStyle}>
+      <div>Ship {shipIndex + 1} — docked</div>
+      {tradableItems.length === 0 ? (
+        <span style={upgradeDescStyle}>No drops to trade yet — clear a zone first.</span>
+      ) : (
+        <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
+          <select
+            value={selectedItemId}
+            onChange={(e) => {
+              setSelectedItemId(e.target.value);
+              setQty(1);
+            }}
+            style={selectStyle}
+          >
+            {tradableItems.map((item) => (
+              <option key={item.id} value={item.id}>
+                {item.name} ({item.tradeValue}/ea)
+              </option>
+            ))}
+          </select>
+          <input
+            type="number"
+            min={1}
+            max={have}
+            value={qty}
+            onChange={(e) => setQty(Number(e.target.value))}
+            style={qtyInputStyle}
+          />
+          <button style={buttonStyle(canSend)} disabled={!canSend} onClick={() => playerProgress.sendShip(shipIndex, selectedItemId, clampedQty)}>
+            Send Ship
+          </button>
+        </div>
+      )}
     </div>
   );
 }
@@ -282,48 +515,9 @@ function colorToCss(hex: number): string {
 
 function formatCost(cost: Cost): string {
   const parts = [`${cost.gold} gold`];
+  if (cost.supplies) parts.push(`${cost.supplies} supplies`);
   for (const { itemId, qty } of cost.items) parts.push(`${qty} ${ITEMS[itemId]!.name}`);
   return parts.join(', ');
-}
-
-function BuildingCard({
-  building,
-  progress,
-  hideCompletedUpgrades,
-}: {
-  building: BuildingDef;
-  progress: ProgressSnapshot;
-  hideCompletedUpgrades: boolean;
-}) {
-  const unlocked = progress.unlockedBuildings.includes(building.id);
-  const allUpgrades = Object.values(UPGRADES).filter((u) => u.building === building.id);
-  const visibleUpgrades = hideCompletedUpgrades ? allUpgrades.filter((u) => !progress.unlockedUpgrades.includes(u.id)) : allUpgrades;
-  const canUnlock = playerProgress.canAfford(building.unlockCost);
-
-  return (
-    <div style={buildingCardStyle}>
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 12 }}>
-        <div>
-          <div style={buildingNameStyle}>{building.name}</div>
-          <div style={buildingDescStyle}>{building.description}</div>
-        </div>
-        {!unlocked && (
-          <button style={buttonStyle(canUnlock)} disabled={!canUnlock} onClick={() => playerProgress.unlockBuilding(building.id, building.unlockCost)}>
-            Unlock — {formatCost(building.unlockCost)}
-          </button>
-        )}
-      </div>
-
-      {unlocked && (
-        <div style={{ marginTop: 10, display: 'flex', flexDirection: 'column', gap: 8 }}>
-          {visibleUpgrades.map((upgrade) => (
-            <UpgradeRow key={upgrade.id} upgrade={upgrade} progress={progress} />
-          ))}
-          {visibleUpgrades.length === 0 && <span style={upgradeDescStyle}>All upgrades owned.</span>}
-        </div>
-      )}
-    </div>
-  );
 }
 
 function UpgradeRow({ upgrade, progress }: { upgrade: UpgradeDef; progress: ProgressSnapshot }) {
@@ -369,6 +563,28 @@ function DevPanel({ progress }: { progress: ProgressSnapshot }) {
             onChange={(e) => playerProgress.devSetGold(Number(e.target.value))}
             style={devInputStyle}
           />
+
+          <div style={devSectionTitleStyle}>Supplies</div>
+          <input
+            type="number"
+            value={progress.supplies}
+            onChange={(e) => playerProgress.devSetSupplies(Number(e.target.value))}
+            style={devInputStyle}
+          />
+
+          <div style={devSectionTitleStyle}>Ships</div>
+          {progress.ships.map((ship, i) => (
+            <div key={i} style={devRowStyle}>
+              <span>
+                Ship {i + 1}: {ship.status}
+              </span>
+              {ship.status === 'at_sea' && (
+                <button style={devSmallButtonStyle} onClick={() => playerProgress.devForceShipReturn(i)}>
+                  Force Return
+                </button>
+              )}
+            </div>
+          ))}
 
           <div style={devSectionTitleStyle}>Items</div>
           {Object.values(ITEMS).map((item) => {
@@ -522,17 +738,64 @@ const zoneRowStyle: CSSProperties = {
   borderRadius: 6,
 };
 
-const buildingCardStyle: CSSProperties = {
+const upgradeDescStyle: CSSProperties = { fontSize: 11, opacity: 0.65, marginTop: 2, maxWidth: 340 };
+const ownedLabelStyle: CSSProperties = { fontSize: 12, opacity: 0.6 };
+
+const navGridStyle: CSSProperties = {
+  display: 'grid',
+  gridTemplateColumns: 'repeat(auto-fit, minmax(160px, 1fr))',
+  gap: 12,
+};
+
+const navTileStyle: CSSProperties = {
+  textAlign: 'left',
+  padding: '14px 16px',
+  background: 'rgba(255,255,255,0.03)',
+  border: '1px solid rgba(232,217,168,0.2)',
+  borderRadius: 10,
+  color: '#e8d9a8',
+  cursor: 'pointer',
+  fontFamily: 'Spectral, serif',
+  display: 'flex',
+  flexDirection: 'column',
+  gap: 4,
+};
+
+const navTileTitleStyle: CSSProperties = { fontFamily: 'Cinzel, serif', fontSize: 15, letterSpacing: '0.04em' };
+const navTileSubtitleStyle: CSSProperties = { fontSize: 12, opacity: 0.7 };
+const navTileBadgeStyle: CSSProperties = {
+  marginTop: 4,
+  alignSelf: 'flex-start',
+  fontSize: 10,
+  letterSpacing: '0.05em',
+  textTransform: 'uppercase',
+  padding: '2px 6px',
+  borderRadius: 4,
+  background: 'rgba(232,217,168,0.15)',
+  opacity: 0.85,
+};
+
+const shipRowStyle: CSSProperties = {
+  display: 'flex',
+  flexDirection: 'column',
+  gap: 6,
   padding: '10px 12px',
   background: 'rgba(255,255,255,0.03)',
   border: '1px solid rgba(232,217,168,0.15)',
   borderRadius: 8,
 };
 
-const buildingNameStyle: CSSProperties = { fontFamily: 'Cinzel, serif', fontSize: 15, letterSpacing: '0.04em' };
-const buildingDescStyle: CSSProperties = { fontSize: 12, opacity: 0.7, marginTop: 2 };
-const upgradeDescStyle: CSSProperties = { fontSize: 11, opacity: 0.65, marginTop: 2, maxWidth: 340 };
-const ownedLabelStyle: CSSProperties = { fontSize: 12, opacity: 0.6 };
+const selectStyle: CSSProperties = {
+  background: 'rgba(255,255,255,0.06)',
+  border: '1px solid rgba(232,217,168,0.3)',
+  borderRadius: 4,
+  color: '#e8d9a8',
+  padding: '4px 6px',
+  fontFamily: 'Spectral, serif',
+  fontSize: 12,
+};
+
+const qtyInputStyle: CSSProperties = { ...selectStyle, width: 56 };
 
 const buildingsHeaderStyle: CSSProperties = {
   display: 'flex',
@@ -678,6 +941,16 @@ const devInputStyle: CSSProperties = {
   color: '#cfe9ff',
   padding: '2px 6px',
   fontSize: 12,
+};
+
+const devSmallButtonStyle: CSSProperties = {
+  padding: '2px 6px',
+  background: 'rgba(120,200,255,0.15)',
+  border: '1px solid rgba(120,200,255,0.4)',
+  borderRadius: 4,
+  color: '#9fd8ff',
+  cursor: 'pointer',
+  fontSize: 11,
 };
 
 const devResetButtonStyle: CSSProperties = {

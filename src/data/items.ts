@@ -15,9 +15,13 @@ export interface ItemDef {
    *  the flat-shaded art direction in art/STYLE_GUIDE.md — no icon art
    *  needed yet. */
   color: number;
+  /** Supplies received per unit when loaded onto a trade ship (see
+   *  PlayerProgress.sendShip) — the Trading Post's whole reason to want
+   *  monster drops in the first place. */
+  tradeValue: number;
 }
 
 export const ITEMS: Record<string, ItemDef> = {
-  'crab-shell': { id: 'crab-shell', name: 'Crab Shell', maxStack: 20, color: 0xd98c3a },
-  'ash-cinder': { id: 'ash-cinder', name: 'Ash Cinder', maxStack: 20, color: 0x8a5a44 },
+  'crab-shell': { id: 'crab-shell', name: 'Crab Shell', maxStack: 20, color: 0xd98c3a, tradeValue: 2 },
+  'ash-cinder': { id: 'ash-cinder', name: 'Ash Cinder', maxStack: 20, color: 0x8a5a44, tradeValue: 3 },
 };

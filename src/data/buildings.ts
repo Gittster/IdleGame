@@ -2,7 +2,7 @@
  *  unlocks that open up their own upgrade lists (src/data/upgrades.ts) —
  *  the MVP form of DESIGN.md §4's Smithing/Alchemy/Construction-style
  *  subsystems (Input: farmed resources -> Output: permanent bonuses). */
-export type BuildingId = 'factory' | 'library' | 'forge';
+export type BuildingId = 'factory' | 'library' | 'forge' | 'craftingBench';
 
 export interface ItemCost {
   itemId: string;
@@ -11,6 +11,9 @@ export interface ItemCost {
 
 export interface Cost {
   gold: number;
+  /** Optional — only Crafting Bench recipes need this so far. Omitted
+   *  costs are treated as 0. */
+  supplies?: number;
   items: ItemCost[];
 }
 
@@ -49,6 +52,12 @@ export const BUILDINGS: Record<BuildingId, BuildingDef> = {
     id: 'forge',
     name: 'The Forge',
     description: 'Craft gear that permanently strengthens your character.',
+    unlockCost: FIVE_MINUTES_OF_ZONE_1_2_FARMING,
+  },
+  craftingBench: {
+    id: 'craftingBench',
+    name: 'The Crafting Bench',
+    description: 'Craft equipment from the supplies your trade ships bring back.',
     unlockCost: FIVE_MINUTES_OF_ZONE_1_2_FARMING,
   },
 };

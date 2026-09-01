@@ -41,6 +41,12 @@ export function clearSavedProgress(): void {
  * a burst of pickups doesn't hammer localStorage with a write per pickup,
  * plus an immediate flush when the tab is hidden or unloaded so the very
  * latest state survives a closed tab between autosave ticks.
+ *
+ * The same interval also resolves any trade ship whose voyage has
+ * finished (PlayerProgress.resolveDueShips is wall-clock based, so it
+ * needs *something* to call it periodically even when the Trading Post
+ * panel isn't open to do it itself) — piggybacking on the existing timer
+ * rather than running a second one.
  */
 export function startAutosave(progress: PlayerProgress): void {
   let dirty = false;
@@ -54,7 +60,10 @@ export function startAutosave(progress: PlayerProgress): void {
     saveProgress(progress);
   };
 
-  setInterval(flush, AUTOSAVE_INTERVAL_MS);
+  setInterval(() => {
+    progress.resolveDueShips();
+    flush();
+  }, AUTOSAVE_INTERVAL_MS);
   document.addEventListener('visibilitychange', () => {
     if (document.visibilityState === 'hidden') flush();
   });

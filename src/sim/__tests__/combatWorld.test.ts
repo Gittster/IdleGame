@@ -313,4 +313,13 @@ describe('CombatWorld', () => {
     expect(world.player.maxHp).toBe(PLAYER_TUNING.maxHp + 15);
     expect(world.player.hp).toBe(world.player.maxHp);
   });
+
+  it("Merchant's Toolkit adds flat damage to the basic attack", () => {
+    const world = new CombatWorld();
+    world.progress.unlockedUpgrades.add(UPGRADES['merchants-toolkit']!.id);
+
+    world.step(1 / 60, { ...noInput(), aimX: 1, aimY: 0, firing: true });
+
+    expect(world.projectiles.damage[0]).toBe(BASIC_ATTACK_TUNING.damage + 3);
+  });
 });

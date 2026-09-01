@@ -1,5 +1,6 @@
 import Phaser from 'phaser';
 import { sceneBridge } from '../state/sceneBridge';
+import { townNavStore } from '../state/townNavStore';
 
 /**
  * A deliberately passive scene: the actual interactive town UI (gold,
@@ -21,6 +22,7 @@ export class TownScene extends Phaser.Scene {
       .setOrigin(0.5);
 
     sceneBridge.setScreen('town');
+    townNavStore.setView('home');
     sceneBridge.setEnterZoneHandler((zoneId) => this.scene.start('Combat', { zoneId }));
     sceneBridge.setGoToTownHandler(null); // no "back to town" button while already in Town
     sceneBridge.setFullscreenToggleHandler(() => {

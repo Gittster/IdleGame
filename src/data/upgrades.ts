@@ -8,7 +8,8 @@ import { POWER_BOLT } from './skills';
 export type UpgradeEffect =
   | { kind: 'autoTargeting' }
   | { kind: 'skillDamageMult'; skillId: string; mult: number }
-  | { kind: 'maxHpFlat'; amount: number };
+  | { kind: 'maxHpFlat'; amount: number }
+  | { kind: 'attackDamageFlat'; amount: number };
 
 export interface UpgradeDef {
   id: string;
@@ -52,5 +53,13 @@ export const UPGRADES: Record<string, UpgradeDef> = {
     description: '+15 max HP.',
     cost: STARTER_UPGRADE_COST,
     effect: { kind: 'maxHpFlat', amount: 15 },
+  },
+  'merchants-toolkit': {
+    id: 'merchants-toolkit',
+    building: 'craftingBench',
+    name: "Merchant's Toolkit",
+    description: '+3 flat damage on your basic attack.',
+    cost: { gold: 40, supplies: 30, items: [] },
+    effect: { kind: 'attackDamageFlat', amount: 3 },
   },
 };

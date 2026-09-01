@@ -101,11 +101,13 @@ describe('PlayerProgress', () => {
   it('serialize/restore round-trips full state', () => {
     const original = new PlayerProgress('zone-a');
     original.addGold(42);
+    original.addSupplies(7);
     original.addItem('crab-shell', 5, 20);
     original.unlockZone('zone-b');
     original.unlockBuilding('factory', { gold: 0, items: [] });
     original.purchaseUpgrade('auto-targeting', { gold: 0, items: [] });
     original.setAutoTarget(true);
+    original.sendShip(0, 'crab-shell', 5);
 
     const data = original.serialize();
     expect(data.version).toBe(1);
@@ -114,12 +116,34 @@ describe('PlayerProgress', () => {
     restored.restore(data);
 
     expect(restored.gold).toBe(42);
-    expect(restored.inventory.countItem('crab-shell')).toBe(5);
+    expect(restored.supplies).toBe(7);
+    expect(restored.inventory.countItem('crab-shell')).toBe(0); // loaded onto the ship
     expect(restored.unlockedZoneIds.has('zone-a')).toBe(true);
     expect(restored.unlockedZoneIds.has('zone-b')).toBe(true);
     expect(restored.unlockedBuildings.has('factory')).toBe(true);
     expect(restored.unlockedUpgrades.has('auto-targeting')).toBe(true);
     expect(restored.autoTargetEnabled).toBe(true);
+    expect(restored.ships[0]).toMatchObject({ status: 'at_sea', cargoItemId: 'crab-shell', cargoQty: 5 });
+  });
+
+  it('restore defaults supplies/ships gracefully for a save written before Trading existed', () => {
+    const progress = new PlayerProgress('zone-a');
+    const legacySave = {
+      version: 1 as const,
+      gold: 10,
+      inventory: { capacity: 12, slots: [] },
+      unlockedZoneIds: ['zone-a'],
+      unlockedBuildings: [],
+      unlockedUpgrades: [],
+      autoTargetEnabled: false,
+      // supplies/ships intentionally omitted, as a pre-Trading save would be
+    } as unknown as Parameters<typeof progress.restore>[0];
+
+    progress.restore(legacySave);
+
+    expect(progress.supplies).toBe(0);
+    expect(progress.ships).toHaveLength(1);
+    expect(progress.ships[0]).toEqual({ status: 'docked' });
   });
 
   it('restore replaces prior state rather than merging with it', () => {
@@ -160,5 +184,68 @@ describe('PlayerProgress', () => {
     expect(progress.unlockedZoneIds.has('zone-z')).toBe(true);
 
     expect(notified).toBeGreaterThan(0);
+  });
+
+  it('canAfford and pay also account for supplies', () => {
+    const progress = new PlayerProgress('zone-a');
+    progress.addSupplies(50);
+
+    expect(progress.canAfford({ gold: 0, supplies: 50, items: [] })).toBe(true);
+    expect(progress.canAfford({ gold: 0, supplies: 51, items: [] })).toBe(false);
+
+    expect(progress.purchaseUpgrade('merchants-toolkit', { gold: 0, supplies: 50, items: [] })).toBe(true);
+    expect(progress.supplies).toBe(0);
+    expect(progress.unlockedUpgrades.has('merchants-toolkit')).toBe(true);
+  });
+
+  it('sendShip requires enough of the item, removes it from inventory, and marks the ship at_sea', () => {
+    const progress = new PlayerProgress('zone-a');
+    expect(progress.sendShip(0, 'crab-shell', 5)).toBe(false); // nothing to send yet
+
+    progress.addItem('crab-shell', 5, 20);
+    expect(progress.sendShip(0, 'crab-shell', 5)).toBe(true);
+    expect(progress.inventory.countItem('crab-shell')).toBe(0);
+    expect(progress.ships[0]).toMatchObject({ status: 'at_sea', cargoItemId: 'crab-shell', cargoQty: 5 });
+
+    // Already at sea — sending again fails even with more cargo available.
+    progress.addItem('crab-shell', 5, 20);
+    expect(progress.sendShip(0, 'crab-shell', 5)).toBe(false);
+  });
+
+  it("resolveDueShips credits supplies once a voyage's return time has passed, and docks the ship", () => {
+    const progress = new PlayerProgress('zone-a');
+    progress.addItem('crab-shell', 4, 20); // tradeValue 2/ea -> 8 supplies
+    progress.sendShip(0, 'crab-shell', 4);
+
+    progress.resolveDueShips();
+    expect(progress.supplies).toBe(0); // not due yet
+    expect(progress.ships[0]!.status).toBe('at_sea');
+
+    (progress.ships[0] as { status: 'at_sea'; returnAt: number }).returnAt = Date.now() - 1;
+    progress.resolveDueShips();
+
+    expect(progress.supplies).toBe(8);
+    expect(progress.ships[0]).toEqual({ status: 'docked' });
+  });
+
+  it('devForceShipReturn instantly resolves an at-sea ship', () => {
+    const progress = new PlayerProgress('zone-a');
+    progress.addItem('ash-cinder', 2, 20); // tradeValue 3/ea -> 6 supplies
+    progress.sendShip(0, 'ash-cinder', 2);
+
+    progress.devForceShipReturn(0);
+
+    expect(progress.supplies).toBe(6);
+    expect(progress.ships[0]).toEqual({ status: 'docked' });
+  });
+
+  it('devSetSupplies sets the value directly and notifies', () => {
+    const progress = new PlayerProgress('zone-a');
+    let notified = 0;
+    progress.subscribe(() => notified++);
+
+    progress.devSetSupplies(25);
+    expect(progress.supplies).toBe(25);
+    expect(notified).toBe(1);
   });
 });
