@@ -97,10 +97,10 @@ export class CombatScene extends Phaser.Scene {
         this.inputs.requestSkillCast(POWER_BOLT.id);
         return;
       }
-      this.inputs.claimJoystickTouch(p);
+      this.inputs.claimTouch(p);
     });
-    this.input.on('pointermove', (p: Phaser.Input.Pointer) => this.inputs.updateJoystickTouch(p));
-    this.input.on('pointerup', (p: Phaser.Input.Pointer) => this.inputs.releaseJoystickTouch(p));
+    this.input.on('pointermove', (p: Phaser.Input.Pointer) => this.inputs.updateTouch(p));
+    this.input.on('pointerup', (p: Phaser.Input.Pointer) => this.inputs.releaseTouch(p));
   }
 
   private isWithin(p: Phaser.Input.Pointer, pos: { x: number; y: number }, radius: number): boolean {
@@ -126,6 +126,8 @@ export class CombatScene extends Phaser.Scene {
       this.fullscreenButtonPos = this.fullscreenButtonCenter();
       this.fullscreenButton.setPosition(this.fullscreenButtonPos.x, this.fullscreenButtonPos.y);
     }
+
+    this.inputs.repositionTouchControls();
   }
 
   private spawnEnemyNear(px: number, py: number): void {
@@ -174,7 +176,7 @@ export class CombatScene extends Phaser.Scene {
     this.hpBarFill = this.add.rectangle(18, 18, 156, 10, 0x4be36a, 1).setOrigin(0, 0).setScrollFactor(0).setDepth(101);
 
     const instructions = this.inputs.isTouch
-      ? 'left stick: move · right stick: aim & fire\ntap the skill icon, then tap a target'
+      ? 'bottom-left stick: move · hold anywhere on the right: aim & fire\ntap the skill icon, then tap a target'
       : 'WASD move · mouse aim · click/space fire\nQ or click the skill icon to cast at cursor · T = stress test';
     const instructionsText = this.add
       .text(16, 36, instructions, { fontSize: '12px', color: '#ffffffaa' })

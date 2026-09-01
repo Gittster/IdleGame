@@ -1,10 +1,11 @@
 import Phaser from 'phaser';
 
 /**
- * A "floating" virtual joystick: invisible until the owning half of the
- * screen is touched, then it appears centered on that touch and the knob
- * drags within a fixed radius of it — the classic mobile twin-stick
- * pattern, rather than a joystick pinned to one fixed spot on screen.
+ * A fixed-position virtual joystick: always visible (semi-transparent) at
+ * the same screen spot, regardless of whether it's currently being
+ * touched — unlike a "floating" joystick that spawns wherever you first
+ * press. Touching anywhere in its zone still drags the knob, computed
+ * relative to the fixed base center rather than the touch-down point.
  */
 export class TouchJoystick {
   private readonly maxRadius: number;
@@ -13,25 +14,22 @@ export class TouchJoystick {
   private readonly knob: Phaser.GameObjects.Arc;
 
   private pointerId: number | null = null;
-  private baseX = 0;
-  private baseY = 0;
+  private baseX: number;
+  private baseY: number;
   private outX = 0;
   private outY = 0;
 
-  constructor(scene: Phaser.Scene, maxRadius = 55, deadzone = 0.15) {
+  constructor(scene: Phaser.Scene, x: number, y: number, maxRadius = 55, deadzone = 0.15) {
     this.maxRadius = maxRadius;
     this.deadzone = deadzone;
+    this.baseX = x;
+    this.baseY = y;
     this.base = scene.add
-      .circle(0, 0, maxRadius, 0xffffff, 0.12)
-      .setStrokeStyle(2, 0xffffff, 0.35)
+      .circle(x, y, maxRadius, 0xffffff, 0.1)
+      .setStrokeStyle(2, 0xffffff, 0.25)
       .setScrollFactor(0)
-      .setDepth(200)
-      .setVisible(false);
-    this.knob = scene.add
-      .circle(0, 0, maxRadius * 0.45, 0xffffff, 0.35)
-      .setScrollFactor(0)
-      .setDepth(201)
-      .setVisible(false);
+      .setDepth(200);
+    this.knob = scene.add.circle(x, y, maxRadius * 0.45, 0xffffff, 0.22).setScrollFactor(0).setDepth(201);
   }
 
   get dx(): number {
@@ -42,23 +40,20 @@ export class TouchJoystick {
     return this.outY;
   }
 
-  /** True once the stick is deflected past its deadzone. */
-  get active(): boolean {
-    return this.pointerId !== null && (this.outX !== 0 || this.outY !== 0);
-  }
-
-  get isHeld(): boolean {
-    return this.pointerId !== null;
+  /** Moves the fixed base (and resets the knob to it) — used to keep the
+   *  joystick anchored to the same screen corner after a resize. */
+  setBasePosition(x: number, y: number): void {
+    this.baseX = x;
+    this.baseY = y;
+    this.base.setPosition(x, y);
+    if (this.pointerId === null) this.knob.setPosition(x, y);
   }
 
   /** Claims this pointer as the joystick's owner if it isn't already tracking one. */
   tryClaim(pointer: Phaser.Input.Pointer): void {
     if (this.pointerId !== null) return;
     this.pointerId = pointer.id;
-    this.baseX = pointer.x;
-    this.baseY = pointer.y;
-    this.base.setPosition(this.baseX, this.baseY).setVisible(true);
-    this.knob.setPosition(this.baseX, this.baseY).setVisible(true);
+    this.updatePointer(pointer);
   }
 
   updatePointer(pointer: Phaser.Input.Pointer): void {
@@ -84,7 +79,6 @@ export class TouchJoystick {
     this.pointerId = null;
     this.outX = 0;
     this.outY = 0;
-    this.base.setVisible(false);
-    this.knob.setVisible(false);
+    this.knob.setPosition(this.baseX, this.baseY);
   }
 }
