@@ -115,10 +115,9 @@ export class CombatWorld {
       const aim = normalize({ x: p.aimX, y: p.aimY });
       const dirX = aim.x !== 0 || aim.y !== 0 ? aim.x : 1;
       const dirY = aim.x !== 0 || aim.y !== 0 ? aim.y : 0;
-      const spawnDist = PLAYER_TUNING.radius + BASIC_ATTACK_TUNING.projectileRadius + 2;
       this.projectiles.spawn({
-        x: p.x + dirX * spawnDist,
-        y: p.y + dirY * spawnDist,
+        x: p.x,
+        y: p.y,
         vx: dirX * BASIC_ATTACK_TUNING.projectileSpeed,
         vy: dirY * BASIC_ATTACK_TUNING.projectileSpeed,
         radius: BASIC_ATTACK_TUNING.projectileRadius,
@@ -149,10 +148,9 @@ export class CombatWorld {
       const dir = normalize({ x: cast.targetX - p.x, y: cast.targetY - p.y });
       const dirX = dir.x !== 0 || dir.y !== 0 ? dir.x : 1;
       const dirY = dir.x !== 0 || dir.y !== 0 ? dir.y : 0;
-      const spawnDist = PLAYER_TUNING.radius + def.projectileRadius + 2;
       this.projectiles.spawn({
-        x: p.x + dirX * spawnDist,
-        y: p.y + dirY * spawnDist,
+        x: p.x,
+        y: p.y,
         vx: dirX * def.projectileSpeed,
         vy: dirY * def.projectileSpeed,
         radius: def.projectileRadius,
@@ -193,8 +191,8 @@ export class CombatWorld {
         const dirX = Math.cos(angle);
         const dirY = Math.sin(angle);
         this.projectiles.spawn({
-          x: e.x + dirX * (e.radius + def.projectile.radius + 2),
-          y: e.y + dirY * (e.radius + def.projectile.radius + 2),
+          x: e.x,
+          y: e.y,
           vx: dirX * def.projectile.speed,
           vy: dirY * def.projectile.speed,
           radius: def.projectile.radius,

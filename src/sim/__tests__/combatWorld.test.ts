@@ -35,6 +35,16 @@ describe('CombatWorld', () => {
     expect(world.projectiles.vx[0]).toBeGreaterThan(0);
   });
 
+  it('spawns the basic attack exactly at the player center, not offset toward the aim', () => {
+    const world = new CombatWorld();
+    const { x: px, y: py } = world.player;
+    world.step(1 / 60, { ...noInput(), aimX: 1, aimY: 0, firing: true }, DUMMY);
+    // prevX/prevY hold the spawn position from before this tick's
+    // integrate() advanced it — x/y have already moved by one tick.
+    expect(world.projectiles.prevX[0]).toBe(px);
+    expect(world.projectiles.prevY[0]).toBe(py);
+  });
+
   it('respects the attack cooldown between shots', () => {
     const world = new CombatWorld();
     world.step(1 / 60, { ...noInput(), firing: true }, DUMMY);
@@ -57,12 +67,16 @@ describe('CombatWorld', () => {
 
   it('casts a skill toward the tapped target on request', () => {
     const world = new CombatWorld();
-    const target = { x: world.player.x + 100, y: world.player.y };
+    const { x: px, y: py } = world.player;
+    const target = { x: px + 100, y: py };
     world.step(1 / 60, { ...noInput(), skillCasts: [{ skillId: POWER_BOLT.id, targetX: target.x, targetY: target.y }] }, DUMMY);
     expect(world.projectiles.count).toBe(1);
     expect(world.projectiles.vx[0]).toBeGreaterThan(0);
     expect(world.projectiles.damage[0]).toBe(POWER_BOLT.damage);
     expect(world.player.skillCooldowns[POWER_BOLT.id]).toBe(POWER_BOLT.cooldown);
+    // Spawns at the player's exact center, same as the basic attack.
+    expect(world.projectiles.prevX[0]).toBe(px);
+    expect(world.projectiles.prevY[0]).toBe(py);
   });
 
   it('drops a skill cast request while the skill is on cooldown', () => {
@@ -71,6 +85,16 @@ describe('CombatWorld', () => {
     world.step(1 / 60, { ...noInput(), skillCasts: [cast] }, DUMMY);
     world.step(1 / 60, { ...noInput(), skillCasts: [cast] }, DUMMY);
     expect(world.projectiles.count).toBe(1);
+  });
+
+  it('spawns enemy projectiles exactly at the enemy center', () => {
+    const world = new CombatWorld();
+    const enemy = world.spawnEnemy(DUMMY, world.player.x + 200, world.player.y);
+    enemy.fireCooldown = 0;
+    world.step(1 / 60, noInput(), DUMMY);
+    const enemyShotIndex = world.projectiles.count - 1;
+    expect(world.projectiles.prevX[enemyShotIndex]).toBe(enemy.x);
+    expect(world.projectiles.prevY[enemyShotIndex]).toBe(enemy.y);
   });
 
   it('ignores a cast request for an unknown skill id', () => {

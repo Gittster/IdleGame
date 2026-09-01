@@ -13,6 +13,8 @@ import { GAME_CONFIG } from '../config';
 const FIXED_DT = WORLD_TUNING.fixedDtMs / 1000;
 const SKILL_BUTTON_RADIUS = 34;
 const FULLSCREEN_BUTTON_RADIUS = 22;
+const MAX_ENEMY_INDICATORS = 14;
+const INDICATOR_EDGE_MARGIN = 28;
 
 export class CombatScene extends Phaser.Scene {
   private world!: CombatWorld;
@@ -22,6 +24,7 @@ export class CombatScene extends Phaser.Scene {
 
   private playerSprite!: Phaser.GameObjects.Image;
   private enemySprites = new Map<number, Phaser.GameObjects.Image>();
+  private enemyIndicators: Phaser.GameObjects.Image[] = [];
 
   private hpBarFill!: Phaser.GameObjects.Rectangle;
   private debugText!: Phaser.GameObjects.Text;
@@ -60,6 +63,7 @@ export class CombatScene extends Phaser.Scene {
     this.cameras.main.startFollow(this.playerSprite, true, 1, 1);
 
     this.projectileRenderer = new ProjectileRenderer(this, 'tex-projectile', WORLD_TUNING.projectileCapacity);
+    this.buildEnemyIndicators();
 
     for (let i = 0; i < GAME_CONFIG.targetEnemyCount; i++) {
       this.spawnEnemyNear(this.world.player.x, this.world.player.y);
@@ -308,6 +312,7 @@ export class CombatScene extends Phaser.Scene {
     }
 
     this.syncEnemySprites(alpha);
+    this.updateEnemyIndicators();
     this.projectileRenderer.sync(this.world.projectiles, alpha);
     this.updateHud();
   }
@@ -322,6 +327,56 @@ export class CombatScene extends Phaser.Scene {
       sprite.x = lerp(enemy.prevX, enemy.x, alpha);
       sprite.y = lerp(enemy.prevY, enemy.y, alpha);
       this.applyHitFlash(sprite, enemy);
+    }
+  }
+
+  private buildEnemyIndicators(): void {
+    for (let i = 0; i < MAX_ENEMY_INDICATORS; i++) {
+      const indicator = this.add
+        .image(0, 0, 'tex-indicator')
+        .setTint(0xe0455a)
+        .setAlpha(0.85)
+        .setScrollFactor(0)
+        .setDepth(60)
+        .setVisible(false);
+      this.enemyIndicators.push(indicator);
+    }
+  }
+
+  /** Points a small arrow at the edge of the screen toward each enemy
+   *  that's currently off-camera, so there's always a cue for which way
+   *  to move even when nothing enemy-shaped is on screen. */
+  private updateEnemyIndicators(): void {
+    const view = this.cameras.main.worldView;
+    const hw = this.scale.width / 2;
+    const hh = this.scale.height / 2;
+    const insetW = hw - INDICATOR_EDGE_MARGIN;
+    const insetH = hh - INDICATOR_EDGE_MARGIN;
+    const px = this.world.player.x;
+    const py = this.world.player.y;
+
+    let shown = 0;
+    for (const enemy of this.world.enemies) {
+      if (shown >= this.enemyIndicators.length) break;
+      if (view.contains(enemy.x, enemy.y)) continue;
+
+      const dx = enemy.x - px;
+      const dy = enemy.y - py;
+      if (dx === 0 && dy === 0) continue;
+
+      const scaleX = dx !== 0 ? insetW / Math.abs(dx) : Infinity;
+      const scaleY = dy !== 0 ? insetH / Math.abs(dy) : Infinity;
+      const t = Math.min(scaleX, scaleY);
+
+      const indicator = this.enemyIndicators[shown]!;
+      indicator.setPosition(hw + dx * t, hh + dy * t);
+      indicator.setRotation(Math.atan2(dy, dx));
+      indicator.setVisible(true);
+      shown++;
+    }
+
+    for (let i = shown; i < this.enemyIndicators.length; i++) {
+      this.enemyIndicators[i]!.setVisible(false);
     }
   }
 

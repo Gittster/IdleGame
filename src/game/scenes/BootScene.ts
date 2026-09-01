@@ -1,4 +1,5 @@
 import Phaser from 'phaser';
+import { BASIC_ATTACK_TUNING } from '../../sim/core/tuning';
 
 /**
  * Generates all placeholder ("programmer art") textures procedurally so the
@@ -14,11 +15,27 @@ export class BootScene extends Phaser.Scene {
   create(): void {
     this.makePlayerTexture();
     this.makeCircleTexture('tex-enemy', 18, 0xe0455a, 0x7a1420);
-    this.makeCircleTexture('tex-projectile', 6, 0xffffff, 0xffffff);
+    // Kept exactly at the basic attack's hitbox radius — any mismatch
+    // between how big a projectile looks and its actual collision circle
+    // reads as "that should have hit" when it doesn't (or vice versa).
+    this.makeCircleTexture('tex-projectile', BASIC_ATTACK_TUNING.projectileRadius, 0xffffff, 0xffffff);
     this.makeCircleTexture('tex-spark', 3, 0xffffff, 0xffffff);
+    this.makeIndicatorTexture();
     this.makeGroundTile();
 
     this.scene.start('Combat');
+  }
+
+  /** A small arrow pointing along local +x, used to mark the direction of
+   *  off-screen enemies at the edge of the viewport. */
+  private makeIndicatorTexture(): void {
+    const w = 20;
+    const h = 16;
+    const g = this.add.graphics();
+    g.fillStyle(0xffffff, 1);
+    g.fillTriangle(2, 2, 2, h - 2, w - 2, h / 2);
+    g.generateTexture('tex-indicator', w, h);
+    g.destroy();
   }
 
   private makePlayerTexture(): void {

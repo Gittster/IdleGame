@@ -11,9 +11,21 @@ import type { ProjectilePool } from '../../sim/core/projectilePool';
 export class ProjectileRenderer {
   private readonly blitter: Phaser.GameObjects.Blitter;
   private readonly bobs: Phaser.GameObjects.Bob[] = [];
+  /** Blitter draws each Bob's frame top-left-anchored at (bob.x, bob.y) —
+   *  there's no origin/pivot concept like a Sprite has. Left uncorrected,
+   *  every projectile renders half a texture-width/height away from its
+   *  true simulated position, which is exactly the kind of thing that
+   *  makes a hit that looks like it grazed an enemy actually miss (the
+   *  visible dot and the real hitbox aren't in the same place). Subtract
+   *  this offset so bob.x/y line up with the sim's true x/y. */
+  private readonly halfW: number;
+  private readonly halfH: number;
 
   constructor(scene: Phaser.Scene, textureKey: string, capacity: number) {
     this.blitter = scene.add.blitter(0, 0, textureKey);
+    const frame = scene.textures.get(textureKey).get();
+    this.halfW = frame.width / 2;
+    this.halfH = frame.height / 2;
     for (let i = 0; i < capacity; i++) {
       const bob = this.blitter.create(0, 0);
       bob.visible = false;
@@ -32,8 +44,8 @@ export class ProjectileRenderer {
         continue;
       }
       bob.visible = true;
-      bob.x = lerp(pool.prevX[i]!, pool.x[i]!, alpha);
-      bob.y = lerp(pool.prevY[i]!, pool.y[i]!, alpha);
+      bob.x = lerp(pool.prevX[i]!, pool.x[i]!, alpha) - this.halfW;
+      bob.y = lerp(pool.prevY[i]!, pool.y[i]!, alpha) - this.halfH;
       bob.tint = pool.tint[i]!;
     }
   }
