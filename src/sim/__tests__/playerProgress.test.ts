@@ -97,4 +97,68 @@ describe('PlayerProgress', () => {
     expect(progress.autoTargetEnabled).toBe(true);
     expect(notified).toBe(1);
   });
+
+  it('serialize/restore round-trips full state', () => {
+    const original = new PlayerProgress('zone-a');
+    original.addGold(42);
+    original.addItem('crab-shell', 5, 20);
+    original.unlockZone('zone-b');
+    original.unlockBuilding('factory', { gold: 0, items: [] });
+    original.purchaseUpgrade('auto-targeting', { gold: 0, items: [] });
+    original.setAutoTarget(true);
+
+    const data = original.serialize();
+    expect(data.version).toBe(1);
+
+    const restored = new PlayerProgress('zone-a');
+    restored.restore(data);
+
+    expect(restored.gold).toBe(42);
+    expect(restored.inventory.countItem('crab-shell')).toBe(5);
+    expect(restored.unlockedZoneIds.has('zone-a')).toBe(true);
+    expect(restored.unlockedZoneIds.has('zone-b')).toBe(true);
+    expect(restored.unlockedBuildings.has('factory')).toBe(true);
+    expect(restored.unlockedUpgrades.has('auto-targeting')).toBe(true);
+    expect(restored.autoTargetEnabled).toBe(true);
+  });
+
+  it('restore replaces prior state rather than merging with it', () => {
+    const progress = new PlayerProgress('zone-a');
+    progress.addGold(999);
+    progress.unlockZone('zone-b');
+
+    const freshSave = new PlayerProgress('zone-x').serialize();
+    progress.restore(freshSave);
+
+    expect(progress.gold).toBe(0);
+    expect(progress.unlockedZoneIds.has('zone-b')).toBe(false);
+    expect(progress.unlockedZoneIds.has('zone-x')).toBe(true);
+  });
+
+  it('dev mutators bypass cost checks entirely and still notify subscribers', () => {
+    const progress = new PlayerProgress('zone-a');
+    let notified = 0;
+    progress.subscribe(() => notified++);
+
+    progress.devSetGold(500);
+    expect(progress.gold).toBe(500);
+
+    progress.devSetItemQty('crab-shell', 7, 20);
+    expect(progress.inventory.countItem('crab-shell')).toBe(7);
+    progress.devSetItemQty('crab-shell', 3, 20); // overwrites the total, doesn't add on top
+    expect(progress.inventory.countItem('crab-shell')).toBe(3);
+
+    progress.devSetUpgradeUnlocked('auto-targeting', true);
+    expect(progress.unlockedUpgrades.has('auto-targeting')).toBe(true);
+    progress.devSetUpgradeUnlocked('auto-targeting', false);
+    expect(progress.unlockedUpgrades.has('auto-targeting')).toBe(false);
+
+    progress.devSetBuildingUnlocked('factory', true);
+    expect(progress.unlockedBuildings.has('factory')).toBe(true);
+
+    progress.devSetZoneUnlocked('zone-z', true);
+    expect(progress.unlockedZoneIds.has('zone-z')).toBe(true);
+
+    expect(notified).toBeGreaterThan(0);
+  });
 });

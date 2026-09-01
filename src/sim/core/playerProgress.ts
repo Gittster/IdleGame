@@ -13,6 +13,20 @@ export interface ProgressSnapshot {
 
 const STARTING_CAPACITY = 12;
 
+/** The on-disk (localStorage) shape of a save — see src/game/state/
+ *  persistence.ts for where this actually gets read/written. Versioned so
+ *  a future shape change can detect and discard (or migrate) an old save
+ *  instead of restoring garbage into a fresh PlayerProgress. */
+export interface PlayerProgressSaveData {
+  version: 1;
+  gold: number;
+  inventory: { capacity: number; slots: (ItemStack | null)[] };
+  unlockedZoneIds: string[];
+  unlockedBuildings: BuildingId[];
+  unlockedUpgrades: string[];
+  autoTargetEnabled: boolean;
+}
+
 /**
  * The account-level state that survives across zones and the Combat/Town
  * scene switch — gold, inventory, and which zones have been unlocked so
@@ -115,6 +129,78 @@ export class PlayerProgress {
 
   setAutoTarget(enabled: boolean): void {
     this.autoTargetEnabled = enabled;
+    this.commit();
+  }
+
+  serialize(): PlayerProgressSaveData {
+    return {
+      version: 1,
+      gold: this.gold,
+      inventory: {
+        capacity: this.inventory.capacity,
+        slots: this.inventory.slots.map((slot) => (slot ? { ...slot } : null)),
+      },
+      unlockedZoneIds: Array.from(this.unlockedZoneIds),
+      unlockedBuildings: Array.from(this.unlockedBuildings),
+      unlockedUpgrades: Array.from(this.unlockedUpgrades),
+      autoTargetEnabled: this.autoTargetEnabled,
+    };
+  }
+
+  /** Overwrites this instance's state from a save, in place — rather than
+   *  constructing a new PlayerProgress, so every existing reference (a
+   *  CombatWorld built off this instance, the game/state/session singleton)
+   *  keeps seeing the restored data without needing to be re-wired. */
+  restore(data: PlayerProgressSaveData): void {
+    this.gold = data.gold;
+    this.inventory.replaceContents(data.inventory.capacity, data.inventory.slots);
+
+    this.unlockedZoneIds.clear();
+    for (const id of data.unlockedZoneIds) this.unlockedZoneIds.add(id);
+
+    this.unlockedBuildings.clear();
+    for (const id of data.unlockedBuildings) this.unlockedBuildings.add(id);
+
+    this.unlockedUpgrades.clear();
+    for (const id of data.unlockedUpgrades) this.unlockedUpgrades.add(id);
+
+    this.autoTargetEnabled = data.autoTargetEnabled;
+    this.commit();
+  }
+
+  // --- Dev-mode mutators -----------------------------------------------
+  // Bypass cost/affordability checks entirely — for the dev panel
+  // (src/ui/App.tsx, import.meta.env.DEV-gated) only. Never called from
+  // any normal gameplay path.
+
+  devSetGold(amount: number): void {
+    this.gold = Math.max(0, Math.floor(amount));
+    this.commit();
+  }
+
+  devSetItemQty(itemId: string, qty: number, maxStack: number): void {
+    const current = this.inventory.countItem(itemId);
+    if (current > 0) this.inventory.removeItem(itemId, current);
+    const clamped = Math.max(0, Math.floor(qty));
+    if (clamped > 0) this.inventory.addItem(itemId, clamped, maxStack);
+    this.commit();
+  }
+
+  devSetUpgradeUnlocked(id: string, unlocked: boolean): void {
+    if (unlocked) this.unlockedUpgrades.add(id);
+    else this.unlockedUpgrades.delete(id);
+    this.commit();
+  }
+
+  devSetBuildingUnlocked(id: BuildingId, unlocked: boolean): void {
+    if (unlocked) this.unlockedBuildings.add(id);
+    else this.unlockedBuildings.delete(id);
+    this.commit();
+  }
+
+  devSetZoneUnlocked(id: string, unlocked: boolean): void {
+    if (unlocked) this.unlockedZoneIds.add(id);
+    else this.unlockedZoneIds.delete(id);
     this.commit();
   }
 

@@ -84,4 +84,16 @@ export class Inventory {
       if (slot.qty === 0) this._slots[i] = null;
     }
   }
+
+  /** Wholesale-replaces capacity and contents — used to restore a saved
+   *  inventory in place, without disturbing the `Inventory` object
+   *  identity anything else might be holding a reference to. */
+  replaceContents(capacity: number, slots: readonly (ItemStack | null)[]): void {
+    this._capacity = capacity;
+    this._slots = new Array(capacity).fill(null);
+    for (let i = 0; i < slots.length && i < capacity; i++) {
+      const slot = slots[i];
+      this._slots[i] = slot ? { ...slot } : null;
+    }
+  }
 }

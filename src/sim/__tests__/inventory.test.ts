@@ -25,6 +25,16 @@ describe('Inventory', () => {
     expect(inv.slots[0]).toEqual({ itemId: 'gold-ore', qty: 20 });
   });
 
+  it('replaceContents overwrites capacity and slots wholesale', () => {
+    const inv = new Inventory(2);
+    inv.addItem('gold-ore', 5, 20);
+
+    inv.replaceContents(3, [null, { itemId: 'crab-shell', qty: 7 }]);
+
+    expect(inv.capacity).toBe(3);
+    expect(inv.slots).toEqual([null, { itemId: 'crab-shell', qty: 7 }, null]);
+  });
+
   it('expand adds usable empty slots without disturbing existing ones', () => {
     const inv = new Inventory(1);
     inv.addItem('gold-ore', 20, 20);

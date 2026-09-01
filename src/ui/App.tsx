@@ -1,6 +1,7 @@
-import { useSyncExternalStore, type CSSProperties } from 'react';
+import { useState, useSyncExternalStore, type CSSProperties } from 'react';
 import { playerProgress } from '../game/state/session';
 import { sceneBridge } from '../game/state/sceneBridge';
+import { clearSavedProgress } from '../game/state/persistence';
 import { ZONES } from '../data/zones';
 import { ITEMS } from '../data/items';
 import { BUILDINGS, type BuildingDef } from '../data/buildings';
@@ -32,6 +33,7 @@ export function App() {
     <>
       <GoldPill gold={progress.gold} />
       {screen === 'town' && <TownPanel progress={progress} />}
+      {import.meta.env.DEV && <DevPanel progress={progress} />}
     </>
   );
 }
@@ -200,6 +202,101 @@ function UpgradeRow({ upgrade, progress }: { upgrade: UpgradeDef; progress: Prog
   );
 }
 
+/** Local-dev-only cheat panel (import.meta.env.DEV-gated, see App()) for
+ *  poking at save state directly — editing item totals, flipping upgrade/
+ *  building/zone unlock flags, forcing a fresh save. Deliberately styled
+ *  distinctly (cool blue) from the parchment/gold Town UI so it always
+ *  reads as "debug tool," not part of the actual game. */
+function DevPanel({ progress }: { progress: ProgressSnapshot }) {
+  const [open, setOpen] = useState(false);
+
+  return (
+    <div style={devWrapStyle}>
+      <button style={devToggleStyle} onClick={() => setOpen((o) => !o)}>
+        {open ? 'Close Dev' : 'Dev'}
+      </button>
+      {open && (
+        <div style={devPanelStyle}>
+          <div style={devSectionTitleStyle}>Gold</div>
+          <input
+            type="number"
+            value={progress.gold}
+            onChange={(e) => playerProgress.devSetGold(Number(e.target.value))}
+            style={devInputStyle}
+          />
+
+          <div style={devSectionTitleStyle}>Items</div>
+          {Object.values(ITEMS).map((item) => {
+            const qty = progress.slots.reduce((sum, slot) => (slot && slot.itemId === item.id ? sum + slot.qty : sum), 0);
+            return (
+              <div key={item.id} style={devRowStyle}>
+                <span>{item.name}</span>
+                <input
+                  type="number"
+                  value={qty}
+                  onChange={(e) => playerProgress.devSetItemQty(item.id, Number(e.target.value), item.maxStack)}
+                  style={devInputStyle}
+                />
+              </div>
+            );
+          })}
+
+          <div style={devSectionTitleStyle}>Zones</div>
+          {Object.values(ZONES).map((zone) => (
+            <label key={zone.id} style={devRowStyle}>
+              <span>{zone.name}</span>
+              <input
+                type="checkbox"
+                checked={progress.unlockedZoneIds.includes(zone.id)}
+                onChange={(e) => playerProgress.devSetZoneUnlocked(zone.id, e.target.checked)}
+              />
+            </label>
+          ))}
+
+          <div style={devSectionTitleStyle}>Buildings</div>
+          {Object.values(BUILDINGS).map((building) => (
+            <label key={building.id} style={devRowStyle}>
+              <span>{building.name}</span>
+              <input
+                type="checkbox"
+                checked={progress.unlockedBuildings.includes(building.id)}
+                onChange={(e) => playerProgress.devSetBuildingUnlocked(building.id, e.target.checked)}
+              />
+            </label>
+          ))}
+
+          <div style={devSectionTitleStyle}>Upgrades</div>
+          {Object.values(UPGRADES).map((upgrade) => (
+            <label key={upgrade.id} style={devRowStyle}>
+              <span>{upgrade.name}</span>
+              <input
+                type="checkbox"
+                checked={progress.unlockedUpgrades.includes(upgrade.id)}
+                onChange={(e) => playerProgress.devSetUpgradeUnlocked(upgrade.id, e.target.checked)}
+              />
+            </label>
+          ))}
+
+          <label style={devRowStyle}>
+            <span>Auto-Targeting active</span>
+            <input type="checkbox" checked={progress.autoTargetEnabled} onChange={(e) => playerProgress.setAutoTarget(e.target.checked)} />
+          </label>
+
+          <button
+            style={devResetButtonStyle}
+            onClick={() => {
+              clearSavedProgress();
+              window.location.reload();
+            }}
+          >
+            Reset Save (reload)
+          </button>
+        </div>
+      )}
+    </div>
+  );
+}
+
 const overlayStyle: CSSProperties = {
   position: 'fixed',
   inset: 0,
@@ -291,6 +388,79 @@ const toggleRowStyle: CSSProperties = {
   background: 'rgba(255,255,255,0.05)',
   borderRadius: 6,
   cursor: 'pointer',
+};
+
+const devWrapStyle: CSSProperties = {
+  position: 'fixed',
+  top: 12,
+  left: 12,
+  zIndex: 20,
+  fontFamily: 'Spectral, serif',
+};
+
+const devToggleStyle: CSSProperties = {
+  pointerEvents: 'auto',
+  padding: '4px 10px',
+  background: 'rgba(0,0,0,0.55)',
+  border: '1px solid rgba(120,200,255,0.5)',
+  borderRadius: 6,
+  color: '#9fd8ff',
+  fontSize: 12,
+  cursor: 'pointer',
+};
+
+const devPanelStyle: CSSProperties = {
+  pointerEvents: 'auto',
+  marginTop: 8,
+  width: 260,
+  maxHeight: '75vh',
+  overflowY: 'auto',
+  background: 'rgba(10,15,20,0.94)',
+  border: '1px solid rgba(120,200,255,0.35)',
+  borderRadius: 8,
+  padding: 12,
+  color: '#cfe9ff',
+  fontSize: 12,
+};
+
+const devSectionTitleStyle: CSSProperties = {
+  fontFamily: 'Cinzel, serif',
+  fontSize: 11,
+  letterSpacing: '0.06em',
+  textTransform: 'uppercase',
+  opacity: 0.8,
+  margin: '10px 0 4px',
+};
+
+const devRowStyle: CSSProperties = {
+  display: 'flex',
+  alignItems: 'center',
+  justifyContent: 'space-between',
+  padding: '3px 0',
+  gap: 8,
+};
+
+const devInputStyle: CSSProperties = {
+  width: 70,
+  background: 'rgba(255,255,255,0.06)',
+  border: '1px solid rgba(120,200,255,0.3)',
+  borderRadius: 4,
+  color: '#cfe9ff',
+  padding: '2px 6px',
+  fontSize: 12,
+};
+
+const devResetButtonStyle: CSSProperties = {
+  marginTop: 10,
+  width: '100%',
+  padding: '6px 10px',
+  background: 'rgba(255,90,90,0.15)',
+  border: '1px solid rgba(255,120,120,0.5)',
+  borderRadius: 6,
+  color: '#ffb3b3',
+  cursor: 'pointer',
+  fontFamily: 'Spectral, serif',
+  fontSize: 12,
 };
 
 function buttonStyle(enabled: boolean): CSSProperties {
