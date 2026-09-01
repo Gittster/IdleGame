@@ -26,6 +26,9 @@ export class CombatScene extends Phaser.Scene {
 
   private accumulator = 0;
   private hitStopRemainingMs = 0;
+  /** Preserves facing when the aim input is momentarily neutral (e.g. a
+   *  recentered touch stick) instead of snapping the sprite to angle 0. */
+  private lastAimAngle = 0;
 
   constructor() {
     super('Combat');
@@ -110,11 +113,11 @@ export class CombatScene extends Phaser.Scene {
     dashBg.setStrokeStyle(1, 0xffffff, 0.3);
     this.dashBarFill = this.add.rectangle(17, 35, 78, 4, 0x66c2ff, 1).setOrigin(0, 0).setScrollFactor(0).setDepth(101);
 
+    const instructions = this.inputs.isTouch
+      ? 'left stick move · right stick aim & fire'
+      : 'WASD move · mouse aim · click/space fire · shift/right-click dash · T = stress test';
     this.add
-      .text(16, 48, 'WASD move · mouse aim · click/space fire · shift/right-click dash · T = stress test', {
-        fontSize: '12px',
-        color: '#ffffffaa',
-      })
+      .text(16, 48, instructions, { fontSize: '12px', color: '#ffffffaa' })
       .setScrollFactor(0)
       .setDepth(100);
 
@@ -145,12 +148,12 @@ export class CombatScene extends Phaser.Scene {
   }
 
   private stepSim(): void {
-    const mouse = this.inputs.pointerWorld();
+    const aim = this.inputs.aimVector(this.world.player.x, this.world.player.y);
     const frame: InputFrame = {
       moveX: this.inputs.moveX,
       moveY: this.inputs.moveY,
-      aimX: mouse.x - this.world.player.x,
-      aimY: mouse.y - this.world.player.y,
+      aimX: aim.x,
+      aimY: aim.y,
       firing: this.inputs.firing,
       dashRequested: this.inputs.consumeDash(),
     };
@@ -196,8 +199,9 @@ export class CombatScene extends Phaser.Scene {
     this.playerSprite.x = lerp(p.prevX, p.x, alpha);
     this.playerSprite.y = lerp(p.prevY, p.y, alpha);
 
-    const mouse = this.inputs.pointerWorld();
-    this.playerSprite.rotation = Math.atan2(mouse.y - this.playerSprite.y, mouse.x - this.playerSprite.x);
+    const aim = this.inputs.aimVector(this.playerSprite.x, this.playerSprite.y);
+    if (aim.x !== 0 || aim.y !== 0) this.lastAimAngle = Math.atan2(aim.y, aim.x);
+    this.playerSprite.rotation = this.lastAimAngle;
 
     if (p.iFrameTimer > 0) {
       this.playerSprite.alpha = Math.floor(this.time.now / 60) % 2 === 0 ? 0.35 : 0.85;

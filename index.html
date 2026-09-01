@@ -2,7 +2,7 @@
 <html lang="en">
   <head>
     <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
     <title>Idle Game — Combat Prototype</title>
     <style>
       html, body {
@@ -11,6 +11,8 @@
         background: #0a0a0d;
         overflow: hidden;
         height: 100%;
+        touch-action: none;
+        overscroll-behavior: none;
       }
       #app {
         display: flex;
@@ -18,9 +20,11 @@
         justify-content: center;
         width: 100vw;
         height: 100vh;
+        touch-action: none;
       }
       canvas {
         image-rendering: pixelated;
+        touch-action: none;
       }
     </style>
   </head>

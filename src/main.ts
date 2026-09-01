@@ -13,5 +13,9 @@ new Phaser.Game({
     mode: Phaser.Scale.FIT,
     autoCenter: Phaser.Scale.CENTER_BOTH,
   },
+  // Two simultaneous touches (move stick + aim stick) plus the mouse pointer slot.
+  input: {
+    activePointers: 3,
+  },
   scene: [BootScene, CombatScene],
 });
