@@ -4,7 +4,8 @@ import type { InputFrame } from '../core/types';
 import { DUMMY } from '../../data/monsters';
 import type { MonsterDef } from '../../data/monsters';
 import { POWER_BOLT } from '../../data/skills';
-import { PLAYER_TUNING, WORLD_TUNING } from '../core/tuning';
+import { UPGRADES } from '../../data/upgrades';
+import { PLAYER_TUNING, WORLD_TUNING, BASIC_ATTACK_TUNING } from '../core/tuning';
 import type { ZoneDef } from '../../data/zones';
 import { PlayerProgress } from '../core/playerProgress';
 
@@ -267,5 +268,49 @@ describe('CombatWorld', () => {
 
     expect(world.groundDrops.some((d) => d.kind === 'item' && d.itemId === 'crab-shell')).toBe(true);
     expect(progress.inventory.slots.every((s) => s?.itemId !== 'crab-shell')).toBe(true);
+  });
+
+  it('Auto-Targeting fires automatically at the nearest enemy with no aim/fire input, at half the normal fire rate', () => {
+    const world = new CombatWorld();
+    world.progress.unlockedUpgrades.add(UPGRADES['auto-targeting']!.id);
+    world.progress.autoTargetEnabled = true;
+    world.spawnEnemy(DUMMY, world.player.x + 60, world.player.y);
+
+    world.step(1 / 60, noInput());
+
+    expect(world.projectiles.count).toBe(1);
+    expect(world.projectiles.vx[0]).toBeGreaterThan(0); // fired toward the enemy, unaimed
+    expect(world.player.attackCooldown).toBeCloseTo(BASIC_ATTACK_TUNING.cooldown * 2, 5);
+  });
+
+  it('Auto-Targeting does nothing while no enemy is in the zone', () => {
+    const world = new CombatWorld();
+    world.progress.unlockedUpgrades.add(UPGRADES['auto-targeting']!.id);
+    world.progress.autoTargetEnabled = true;
+
+    world.step(1 / 60, noInput());
+
+    expect(world.projectiles.count).toBe(0);
+  });
+
+  it('Empowered Bolt increases Power Bolt damage by its multiplier', () => {
+    const world = new CombatWorld();
+    world.progress.unlockedUpgrades.add(UPGRADES['empowered-bolt']!.id);
+    const target = { x: world.player.x + 100, y: world.player.y };
+
+    world.step(1 / 60, { ...noInput(), skillCasts: [{ skillId: POWER_BOLT.id, targetX: target.x, targetY: target.y }] });
+
+    expect(world.projectiles.damage[0]).toBe(POWER_BOLT.damage * 1.5);
+  });
+
+  it("Traveler's Charm grants +15 max HP, applied when a CombatWorld is constructed", () => {
+    const zone = makeZone();
+    const progress = new PlayerProgress(zone.id);
+    progress.unlockedUpgrades.add(UPGRADES['travelers-charm']!.id);
+
+    const world = new CombatWorld(zone, progress);
+
+    expect(world.player.maxHp).toBe(PLAYER_TUNING.maxHp + 15);
+    expect(world.player.hp).toBe(world.player.maxHp);
   });
 });

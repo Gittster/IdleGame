@@ -3,6 +3,9 @@ import { playerProgress } from '../game/state/session';
 import { sceneBridge } from '../game/state/sceneBridge';
 import { ZONES } from '../data/zones';
 import { ITEMS } from '../data/items';
+import { BUILDINGS, type BuildingDef } from '../data/buildings';
+import type { Cost } from '../data/buildings';
+import { UPGRADES, type UpgradeDef } from '../data/upgrades';
 import type { ProgressSnapshot } from '../sim/core/playerProgress';
 import type { ItemStack } from '../sim/core/inventory';
 
@@ -86,6 +89,13 @@ function TownPanel({ progress }: { progress: ProgressSnapshot }) {
           Expand Inventory (+{EXPAND_SLOTS} slots) — {cost} gold
         </button>
 
+        <h2 style={sectionStyle}>Buildings</h2>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 10, marginBottom: 12 }}>
+          {Object.values(BUILDINGS).map((building) => (
+            <BuildingCard key={building.id} building={building} progress={progress} />
+          ))}
+        </div>
+
         <h2 style={sectionStyle}>Zones</h2>
         <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
           {Object.values(ZONES).map((zone) => {
@@ -121,6 +131,73 @@ function InventorySlot({ stack }: { stack: ItemStack | null }) {
 
 function colorToCss(hex: number): string {
   return `#${hex.toString(16).padStart(6, '0')}`;
+}
+
+function formatCost(cost: Cost): string {
+  const parts = [`${cost.gold} gold`];
+  for (const { itemId, qty } of cost.items) parts.push(`${qty} ${ITEMS[itemId]!.name}`);
+  return parts.join(', ');
+}
+
+function BuildingCard({ building, progress }: { building: BuildingDef; progress: ProgressSnapshot }) {
+  const unlocked = progress.unlockedBuildings.includes(building.id);
+  const upgrades = Object.values(UPGRADES).filter((u) => u.building === building.id);
+  const canUnlock = playerProgress.canAfford(building.unlockCost);
+
+  return (
+    <div style={buildingCardStyle}>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 12 }}>
+        <div>
+          <div style={buildingNameStyle}>{building.name}</div>
+          <div style={buildingDescStyle}>{building.description}</div>
+        </div>
+        {!unlocked && (
+          <button style={buttonStyle(canUnlock)} disabled={!canUnlock} onClick={() => playerProgress.unlockBuilding(building.id, building.unlockCost)}>
+            Unlock — {formatCost(building.unlockCost)}
+          </button>
+        )}
+      </div>
+
+      {unlocked && (
+        <div style={{ marginTop: 10, display: 'flex', flexDirection: 'column', gap: 8 }}>
+          {upgrades.map((upgrade) => (
+            <UpgradeRow key={upgrade.id} upgrade={upgrade} progress={progress} />
+          ))}
+          {building.id === 'factory' && progress.unlockedUpgrades.includes('auto-targeting') && (
+            <label style={toggleRowStyle}>
+              <span>Auto-Targeting</span>
+              <input
+                type="checkbox"
+                checked={progress.autoTargetEnabled}
+                onChange={(e) => playerProgress.setAutoTarget(e.target.checked)}
+              />
+            </label>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function UpgradeRow({ upgrade, progress }: { upgrade: UpgradeDef; progress: ProgressSnapshot }) {
+  const owned = progress.unlockedUpgrades.includes(upgrade.id);
+  const affordable = playerProgress.canAfford(upgrade.cost);
+
+  return (
+    <div style={zoneRowStyle}>
+      <div>
+        <div>{upgrade.name}</div>
+        <div style={upgradeDescStyle}>{upgrade.description}</div>
+      </div>
+      {owned ? (
+        <span style={ownedLabelStyle}>Owned</span>
+      ) : (
+        <button style={buttonStyle(affordable)} disabled={!affordable} onClick={() => playerProgress.purchaseUpgrade(upgrade.id, upgrade.cost)}>
+          {formatCost(upgrade.cost)}
+        </button>
+      )}
+    </div>
+  );
 }
 
 const overlayStyle: CSSProperties = {
@@ -192,6 +269,28 @@ const zoneRowStyle: CSSProperties = {
   padding: '6px 10px',
   background: 'rgba(255,255,255,0.03)',
   borderRadius: 6,
+};
+
+const buildingCardStyle: CSSProperties = {
+  padding: '10px 12px',
+  background: 'rgba(255,255,255,0.03)',
+  border: '1px solid rgba(232,217,168,0.15)',
+  borderRadius: 8,
+};
+
+const buildingNameStyle: CSSProperties = { fontFamily: 'Cinzel, serif', fontSize: 15, letterSpacing: '0.04em' };
+const buildingDescStyle: CSSProperties = { fontSize: 12, opacity: 0.7, marginTop: 2 };
+const upgradeDescStyle: CSSProperties = { fontSize: 11, opacity: 0.65, marginTop: 2, maxWidth: 340 };
+const ownedLabelStyle: CSSProperties = { fontSize: 12, opacity: 0.6 };
+
+const toggleRowStyle: CSSProperties = {
+  display: 'flex',
+  alignItems: 'center',
+  justifyContent: 'space-between',
+  padding: '6px 10px',
+  background: 'rgba(255,255,255,0.05)',
+  borderRadius: 6,
+  cursor: 'pointer',
 };
 
 function buttonStyle(enabled: boolean): CSSProperties {

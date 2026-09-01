@@ -438,7 +438,12 @@ export class CombatScene extends Phaser.Scene {
     this.playerSprite.x = lerp(p.prevX, p.x, alpha);
     this.playerSprite.y = lerp(p.prevY, p.y, alpha);
 
-    const aim = this.inputs.aimVector(this.playerSprite.x, this.playerSprite.y);
+    // Auto-Targeting drives aim from the nearest enemy in sim space rather
+    // than the mouse, so facing has to read from world.player.aimX/Y (the
+    // sim's authoritative aim for that tick) instead of recomputing from
+    // the raw pointer position while it's active.
+    const autoTargeting = this.world.progress.unlockedUpgrades.has('auto-targeting') && this.world.progress.autoTargetEnabled;
+    const aim = autoTargeting ? { x: p.aimX, y: p.aimY } : this.inputs.aimVector(this.playerSprite.x, this.playerSprite.y);
     if (aim.x !== 0 || aim.y !== 0) this.lastAimAngle = Math.atan2(aim.y, aim.x);
     this.playerSprite.rotation = this.lastAimAngle;
 

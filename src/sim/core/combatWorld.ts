@@ -9,6 +9,7 @@ import { PlayerProgress } from './playerProgress';
 import type { MonsterDef } from '../../data/monsters';
 import { SKILLS } from '../../data/skills';
 import { ITEMS } from '../../data/items';
+import { UPGRADES } from '../../data/upgrades';
 import { FIRST_ZONE, type ZoneDef } from '../../data/zones';
 
 /** A pickup lying in the zone at a fixed world position until the player
@@ -80,7 +81,8 @@ export class CombatWorld {
   constructor(zone: ZoneDef = FIRST_ZONE, progress: PlayerProgress = new PlayerProgress(zone.id)) {
     this.currentZone = zone;
     this.killsRemaining = zone.killsToClear;
-    this.player = createPlayer(zone.playerSpawn.x, zone.playerSpawn.y, PLAYER_TUNING.maxHp);
+    const maxHp = PLAYER_TUNING.maxHp + maxHpBonus(progress);
+    this.player = createPlayer(zone.playerSpawn.x, zone.playerSpawn.y, maxHp);
     this.projectiles = new ProjectilePool(WORLD_TUNING.projectileCapacity);
     this.enemyHash = new SpatialHash(WORLD_TUNING.hashCellSize);
     this.progress = progress;
@@ -181,7 +183,19 @@ export class CombatWorld {
   private stepPlayerAttack(dt: number, input: InputFrame): void {
     const p = this.player;
     if (p.attackCooldown > 0) p.attackCooldown -= dt;
-    if (input.firing) {
+
+    const autoTargetOn = this.progress.unlockedUpgrades.has('auto-targeting') && this.progress.autoTargetEnabled;
+    let firing = input.firing;
+    if (autoTargetOn) {
+      const target = this.findNearestEnemy(p.x, p.y);
+      if (target) {
+        p.aimX = target.x - p.x;
+        p.aimY = target.y - p.y;
+      }
+      firing = target !== null;
+    }
+
+    if (firing) {
       p.fireBuffer = BASIC_ATTACK_TUNING.bufferWindow;
     } else if (p.fireBuffer > 0) {
       p.fireBuffer -= dt;
@@ -204,9 +218,29 @@ export class CombatWorld {
         tint: BASIC_ATTACK_TUNING.tint,
       });
       this.events.fired.push({ x: p.x, y: p.y, team: Team.Player });
-      p.attackCooldown = BASIC_ATTACK_TUNING.cooldown;
+      // Auto-Targeting trades half the fire rate for not needing to aim.
+      p.attackCooldown = autoTargetOn ? BASIC_ATTACK_TUNING.cooldown * 2 : BASIC_ATTACK_TUNING.cooldown;
       p.fireBuffer = 0;
     }
+  }
+
+  /** Nearest living enemy to (x, y), or null if there are none — used by
+   *  the Auto-Targeting upgrade. A plain scan is fine at this enemy count
+   *  (the spatial hash exists for projectile-vs-enemy broadphase, not
+   *  this once-per-tick lookup). */
+  private findNearestEnemy(x: number, y: number): EnemyState | null {
+    let nearest: EnemyState | null = null;
+    let nearestDistSq = Infinity;
+    for (const e of this.enemies) {
+      const dx = e.x - x;
+      const dy = e.y - y;
+      const distSq = dx * dx + dy * dy;
+      if (distSq < nearestDistSq) {
+        nearestDistSq = distSq;
+        nearest = e;
+      }
+    }
+    return nearest;
   }
 
   private stepPlayerSkills(dt: number, input: InputFrame): void {
@@ -230,7 +264,7 @@ export class CombatWorld {
         vx: dirX * def.projectileSpeed,
         vy: dirY * def.projectileSpeed,
         radius: def.projectileRadius,
-        damage: def.damage,
+        damage: def.damage * this.skillDamageMultiplier(def.id),
         life: def.projectileLife,
         team: Team.Player,
         pierce: def.pierce,
@@ -239,6 +273,20 @@ export class CombatWorld {
       p.skillCooldowns[def.id] = def.cooldown;
       this.events.skillCasts.push({ skillId: def.id, x: p.x, y: p.y, dirX, dirY });
     }
+  }
+
+  /** Product of every owned Library upgrade's multiplier for this skill
+   *  (1 if none apply) — stacks multiplicatively, matching how the game's
+   *  other percentage bonuses are expected to compose. */
+  private skillDamageMultiplier(skillId: string): number {
+    let mult = 1;
+    for (const id of this.progress.unlockedUpgrades) {
+      const upgrade = UPGRADES[id];
+      if (upgrade?.effect.kind === 'skillDamageMult' && upgrade.effect.skillId === skillId) {
+        mult *= upgrade.effect.mult;
+      }
+    }
+    return mult;
   }
 
   private stepEnemies(dt: number): void {
@@ -487,4 +535,16 @@ function moveToward(current: number, target: number, maxDelta: number): number {
 
 function randInt(min: number, max: number): number {
   return Math.floor(min + Math.random() * (max - min + 1));
+}
+
+/** Sum of every owned Forge upgrade's flat max-HP bonus. Applied once at
+ *  construction (a fresh CombatWorld is built on every zone entry, so a
+ *  Town purchase takes effect the next time combat starts). */
+function maxHpBonus(progress: PlayerProgress): number {
+  let bonus = 0;
+  for (const id of progress.unlockedUpgrades) {
+    const upgrade = UPGRADES[id];
+    if (upgrade?.effect.kind === 'maxHpFlat') bonus += upgrade.effect.amount;
+  }
+  return bonus;
 }

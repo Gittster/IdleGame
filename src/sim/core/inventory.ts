@@ -58,4 +58,30 @@ export class Inventory {
     this._capacity += extraSlots;
     for (let i = 0; i < extraSlots; i++) this._slots.push(null);
   }
+
+  /** Total quantity of itemId held across every slot. */
+  countItem(itemId: string): number {
+    let total = 0;
+    for (const slot of this._slots) {
+      if (slot && slot.itemId === itemId) total += slot.qty;
+    }
+    return total;
+  }
+
+  /** Removes up to qty of itemId, across as many slots as it takes.
+   *  Assumes the caller already checked there's enough (see
+   *  PlayerProgress.canAfford) — silently removes less than qty
+   *  otherwise, since a purchase system with atomic afford-checks never
+   *  hits that case. */
+  removeItem(itemId: string, qty: number): void {
+    let remaining = qty;
+    for (let i = 0; i < this._slots.length && remaining > 0; i++) {
+      const slot = this._slots[i];
+      if (!slot || slot.itemId !== itemId) continue;
+      const take = Math.min(slot.qty, remaining);
+      slot.qty -= take;
+      remaining -= take;
+      if (slot.qty === 0) this._slots[i] = null;
+    }
+  }
 }

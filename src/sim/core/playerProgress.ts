@@ -1,10 +1,14 @@
 import { Inventory, type ItemStack } from './inventory';
+import type { BuildingId, Cost } from '../../data/buildings';
 
 export interface ProgressSnapshot {
   gold: number;
   slots: readonly (ItemStack | null)[];
   capacity: number;
   unlockedZoneIds: readonly string[];
+  unlockedBuildings: readonly BuildingId[];
+  unlockedUpgrades: readonly string[];
+  autoTargetEnabled: boolean;
 }
 
 const STARTING_CAPACITY = 12;
@@ -22,6 +26,9 @@ export class PlayerProgress {
   gold = 0;
   readonly inventory: Inventory;
   readonly unlockedZoneIds = new Set<string>();
+  readonly unlockedBuildings = new Set<BuildingId>();
+  readonly unlockedUpgrades = new Set<string>();
+  autoTargetEnabled = false;
 
   private listeners = new Set<() => void>();
   private snapshot: ProgressSnapshot;
@@ -71,12 +78,55 @@ export class PlayerProgress {
     this.commit();
   }
 
+  canAfford(cost: Cost): boolean {
+    if (this.gold < cost.gold) return false;
+    return cost.items.every(({ itemId, qty }) => this.inventory.countItem(itemId) >= qty);
+  }
+
+  /** Deducts a cost if affordable. Returns whether it was — the caller
+   *  (unlockBuilding/purchaseUpgrade) only marks the thing owned when
+   *  this succeeds. */
+  private pay(cost: Cost): boolean {
+    if (!this.canAfford(cost)) return false;
+    this.gold -= cost.gold;
+    for (const { itemId, qty } of cost.items) this.inventory.removeItem(itemId, qty);
+    return true;
+  }
+
+  /** Returns true if the building ends up unlocked — either it already
+   *  was, or this purchase just unlocked it. */
+  unlockBuilding(id: BuildingId, cost: Cost): boolean {
+    if (this.unlockedBuildings.has(id)) return true;
+    if (!this.pay(cost)) return false;
+    this.unlockedBuildings.add(id);
+    this.commit();
+    return true;
+  }
+
+  /** Returns true if the upgrade ends up owned — either it already was,
+   *  or this purchase just bought it. */
+  purchaseUpgrade(id: string, cost: Cost): boolean {
+    if (this.unlockedUpgrades.has(id)) return true;
+    if (!this.pay(cost)) return false;
+    this.unlockedUpgrades.add(id);
+    this.commit();
+    return true;
+  }
+
+  setAutoTarget(enabled: boolean): void {
+    this.autoTargetEnabled = enabled;
+    this.commit();
+  }
+
   private buildSnapshot(): ProgressSnapshot {
     return {
       gold: this.gold,
       slots: this.inventory.slots.slice(),
       capacity: this.inventory.capacity,
       unlockedZoneIds: Array.from(this.unlockedZoneIds),
+      unlockedBuildings: Array.from(this.unlockedBuildings),
+      unlockedUpgrades: Array.from(this.unlockedUpgrades),
+      autoTargetEnabled: this.autoTargetEnabled,
     };
   }
 
