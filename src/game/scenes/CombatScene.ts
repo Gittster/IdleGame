@@ -13,6 +13,7 @@ import { GAME_CONFIG } from '../config';
 import { TEXT_STYLES } from '../ui/theme';
 import { playerProgress } from '../state/session';
 import { sceneBridge } from '../state/sceneBridge';
+import { settingsStore } from '../state/settingsStore';
 
 const FIXED_DT = WORLD_TUNING.fixedDtMs / 1000;
 const SKILL_BUTTON_RADIUS = 34;
@@ -330,6 +331,10 @@ export class CombatScene extends Phaser.Scene {
   }
 
   update(_time: number, delta: number): void {
+    // Frozen while the Combat Settings panel is open (its own pause
+    // button) — the frame just holds, same as any pause menu.
+    if (settingsStore.isOpen()) return;
+
     if (this.hitStopRemainingMs > 0) {
       this.hitStopRemainingMs -= delta;
       this.render(this.accumulator / WORLD_TUNING.fixedDtMs);

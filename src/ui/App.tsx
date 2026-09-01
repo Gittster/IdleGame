@@ -1,8 +1,10 @@
-import { useState, useSyncExternalStore, type CSSProperties } from 'react';
+import { useEffect, useState, useSyncExternalStore, type CSSProperties, type ReactNode } from 'react';
 import { playerProgress } from '../game/state/session';
 import { sceneBridge } from '../game/state/sceneBridge';
 import { clearSavedProgress } from '../game/state/persistence';
 import { isDevModeEnabled, disableDevMode } from '../game/state/devMode';
+import { inventoryStore } from '../game/state/inventoryStore';
+import { settingsStore } from '../game/state/settingsStore';
 import { ZONES } from '../data/zones';
 import { ITEMS } from '../data/items';
 import { BUILDINGS, type BuildingDef } from '../data/buildings';
@@ -29,11 +31,43 @@ export function App() {
     (cb) => playerProgress.subscribe(cb),
     () => playerProgress.getSnapshot()
   );
+  const inventoryOpen = useSyncExternalStore(
+    (cb) => inventoryStore.subscribe(cb),
+    () => inventoryStore.isOpen()
+  );
+  const settingsOpen = useSyncExternalStore(
+    (cb) => settingsStore.subscribe(cb),
+    () => settingsStore.isOpen()
+  );
+
+  // "I" toggles the Inventory overlay from anywhere (combat or town) —
+  // a window-level listener works uniformly across both scenes without
+  // needing a separate Phaser-side binding for Combat specifically.
+  useEffect(() => {
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.key.toLowerCase() !== 'i') return;
+      const active = document.activeElement;
+      if (active instanceof HTMLInputElement || active instanceof HTMLTextAreaElement) return;
+      inventoryStore.toggle();
+    };
+    window.addEventListener('keydown', onKeyDown);
+    return () => window.removeEventListener('keydown', onKeyDown);
+  }, []);
+
+  // Gold's only hidden case is Town's default view — it reappears the
+  // moment the Inventory overlay is open, in combat or in town.
+  const showGold = screen !== 'town' || inventoryOpen;
+
+  let modal: ReactNode = null;
+  if (settingsOpen) modal = <SettingsPanel />;
+  else if (inventoryOpen) modal = <InventoryPanel progress={progress} />;
+  else if (screen === 'town') modal = <TownPanel progress={progress} />;
 
   return (
     <>
-      <GoldPill gold={progress.gold} />
-      {screen === 'town' && <TownPanel progress={progress} />}
+      {showGold && <GoldPill gold={progress.gold} />}
+      <HudButtons inventoryOpen={inventoryOpen} settingsOpen={settingsOpen} />
+      {modal}
       {isDevModeEnabled && <DevPanel progress={progress} />}
     </>
   );
@@ -41,61 +75,41 @@ export function App() {
 
 function GoldPill({ gold }: { gold: number }) {
   return (
-    <div
-      style={{
-        position: 'fixed',
-        top: 12,
-        right: 12,
-        pointerEvents: 'none',
-        background: 'rgba(0,0,0,0.55)',
-        border: '1px solid rgba(232,217,168,0.4)',
-        borderRadius: 6,
-        padding: '4px 10px',
-        color: '#e8d9a8',
-        fontFamily: 'Cinzel, serif',
-        fontSize: 13,
-        letterSpacing: '0.05em',
-        textTransform: 'uppercase',
-      }}
-    >
-      Gold: {gold}
+    <div style={goldPillStyle}>Gold: {gold}</div>
+  );
+}
+
+/** Small always-visible HUD buttons (Inventory, Settings) — visible over
+ *  both Combat and Town, matching the request that both work "in town,
+ *  and in zones for that matter." */
+function HudButtons({ inventoryOpen, settingsOpen }: { inventoryOpen: boolean; settingsOpen: boolean }) {
+  return (
+    <div style={hudButtonStackStyle}>
+      <button style={hudButtonStyle} onClick={() => inventoryStore.toggle()}>
+        {inventoryOpen ? 'Close Inventory' : 'Inventory [I]'}
+      </button>
+      <button style={hudButtonStyle} onClick={() => settingsStore.setOpen(!settingsOpen)}>
+        {settingsOpen ? 'Close Settings' : 'Settings'}
+      </button>
     </div>
   );
 }
 
 function TownPanel({ progress }: { progress: ProgressSnapshot }) {
-  const cost = expandCost(progress.capacity);
-  const canExpand = progress.gold >= cost;
-  const filled = progress.slots.filter((slot) => slot !== null).length;
+  const hideCompletedUpgrades = useSyncExternalStore(
+    (cb) => settingsStore.subscribe(cb),
+    () => settingsStore.getHideCompletedUpgrades()
+  );
 
   return (
     <div style={overlayStyle}>
       <div style={cardStyle}>
         <h1 style={titleStyle}>Town</h1>
-        <p style={subtleStyle}>Gold: {progress.gold}</p>
-
-        <h2 style={sectionStyle}>
-          Inventory — {filled}/{progress.capacity}
-        </h2>
-        <div style={gridStyle}>
-          {progress.slots.map((slot, i) => (
-            <InventorySlot key={i} stack={slot} />
-          ))}
-        </div>
-        <button
-          style={buttonStyle(canExpand)}
-          disabled={!canExpand}
-          onClick={() => {
-            if (playerProgress.spendGold(cost)) playerProgress.expandInventory(EXPAND_SLOTS);
-          }}
-        >
-          Expand Inventory (+{EXPAND_SLOTS} slots) — {cost} gold
-        </button>
 
         <h2 style={sectionStyle}>Buildings</h2>
         <div style={{ display: 'flex', flexDirection: 'column', gap: 10, marginBottom: 12 }}>
           {Object.values(BUILDINGS).map((building) => (
-            <BuildingCard key={building.id} building={building} progress={progress} />
+            <BuildingCard key={building.id} building={building} progress={progress} hideCompletedUpgrades={hideCompletedUpgrades} />
           ))}
         </div>
 
@@ -113,6 +127,81 @@ function TownPanel({ progress }: { progress: ProgressSnapshot }) {
             );
           })}
         </div>
+      </div>
+    </div>
+  );
+}
+
+/** The Inventory overlay — gold total, the slot grid, and the expand
+ *  purchase — available over both Combat and Town via inventoryStore
+ *  (the "I" key or the HUD button), rather than living inside Town's own
+ *  panel. Takes over in place of whatever other modal would show, per
+ *  App()'s modal precedence. */
+function InventoryPanel({ progress }: { progress: ProgressSnapshot }) {
+  const cost = expandCost(progress.capacity);
+  const canExpand = progress.gold >= cost;
+  const filled = progress.slots.filter((slot) => slot !== null).length;
+
+  return (
+    <div style={overlayStyle}>
+      <div style={cardStyle}>
+        <div style={modalHeaderStyle}>
+          <h1 style={titleStyle}>Inventory</h1>
+          <button style={closeButtonStyle} onClick={() => inventoryStore.setOpen(false)}>
+            Close
+          </button>
+        </div>
+        <p style={subtleStyle}>Gold: {progress.gold}</p>
+
+        <h2 style={sectionStyle}>
+          Items — {filled}/{progress.capacity}
+        </h2>
+        <div style={gridStyle}>
+          {progress.slots.map((slot, i) => (
+            <InventorySlot key={i} stack={slot} />
+          ))}
+        </div>
+        <button
+          style={buttonStyle(canExpand)}
+          disabled={!canExpand}
+          onClick={() => {
+            if (playerProgress.spendGold(cost)) playerProgress.expandInventory(EXPAND_SLOTS);
+          }}
+        >
+          Expand Inventory (+{EXPAND_SLOTS} slots) — {cost} gold
+        </button>
+      </div>
+    </div>
+  );
+}
+
+/** Combat Settings — reachable via the Settings HUD button in both Combat
+ *  (where opening it also pauses the sim, see CombatScene.update) and
+ *  Town. Just the one preference so far; more settings land here later. */
+function SettingsPanel() {
+  const hideCompletedUpgrades = useSyncExternalStore(
+    (cb) => settingsStore.subscribe(cb),
+    () => settingsStore.getHideCompletedUpgrades()
+  );
+
+  return (
+    <div style={overlayStyle}>
+      <div style={cardStyle}>
+        <div style={modalHeaderStyle}>
+          <h1 style={titleStyle}>Settings</h1>
+          <button style={closeButtonStyle} onClick={() => settingsStore.setOpen(false)}>
+            Close
+          </button>
+        </div>
+
+        <label style={zoneRowStyle}>
+          <span>Hide completed upgrades</span>
+          <input
+            type="checkbox"
+            checked={hideCompletedUpgrades}
+            onChange={(e) => settingsStore.setHideCompletedUpgrades(e.target.checked)}
+          />
+        </label>
       </div>
     </div>
   );
@@ -142,9 +231,23 @@ function formatCost(cost: Cost): string {
   return parts.join(', ');
 }
 
-function BuildingCard({ building, progress }: { building: BuildingDef; progress: ProgressSnapshot }) {
+function BuildingCard({
+  building,
+  progress,
+  hideCompletedUpgrades,
+}: {
+  building: BuildingDef;
+  progress: ProgressSnapshot;
+  hideCompletedUpgrades: boolean;
+}) {
   const unlocked = progress.unlockedBuildings.includes(building.id);
-  const upgrades = Object.values(UPGRADES).filter((u) => u.building === building.id);
+  const allUpgrades = Object.values(UPGRADES).filter((u) => u.building === building.id);
+  // Auto-Targeting (and anything else with an ongoing on/off toggle, not
+  // just a one-time purchase) stays visible even when hiding "completed"
+  // upgrades — hiding it would hide its only way to be switched off again.
+  const visibleUpgrades = hideCompletedUpgrades
+    ? allUpgrades.filter((u) => u.effect.kind === 'autoTargeting' || !progress.unlockedUpgrades.includes(u.id))
+    : allUpgrades;
   const canUnlock = playerProgress.canAfford(building.unlockCost);
 
   return (
@@ -163,19 +266,10 @@ function BuildingCard({ building, progress }: { building: BuildingDef; progress:
 
       {unlocked && (
         <div style={{ marginTop: 10, display: 'flex', flexDirection: 'column', gap: 8 }}>
-          {upgrades.map((upgrade) => (
+          {visibleUpgrades.map((upgrade) => (
             <UpgradeRow key={upgrade.id} upgrade={upgrade} progress={progress} />
           ))}
-          {building.id === 'factory' && progress.unlockedUpgrades.includes('auto-targeting') && (
-            <label style={toggleRowStyle}>
-              <span>Auto-Targeting</span>
-              <input
-                type="checkbox"
-                checked={progress.autoTargetEnabled}
-                onChange={(e) => playerProgress.setAutoTarget(e.target.checked)}
-              />
-            </label>
-          )}
+          {visibleUpgrades.length === 0 && <span style={upgradeDescStyle}>All upgrades owned.</span>}
         </div>
       )}
     </div>
@@ -185,6 +279,7 @@ function BuildingCard({ building, progress }: { building: BuildingDef; progress:
 function UpgradeRow({ upgrade, progress }: { upgrade: UpgradeDef; progress: ProgressSnapshot }) {
   const owned = progress.unlockedUpgrades.includes(upgrade.id);
   const affordable = playerProgress.canAfford(upgrade.cost);
+  const isAutoTargeting = upgrade.effect.kind === 'autoTargeting';
 
   return (
     <div style={zoneRowStyle}>
@@ -193,7 +288,18 @@ function UpgradeRow({ upgrade, progress }: { upgrade: UpgradeDef; progress: Prog
         <div style={upgradeDescStyle}>{upgrade.description}</div>
       </div>
       {owned ? (
-        <span style={ownedLabelStyle}>Owned</span>
+        isAutoTargeting ? (
+          <label style={inlineToggleStyle}>
+            <span style={ownedLabelStyle}>{progress.autoTargetEnabled ? 'On' : 'Off'}</span>
+            <input
+              type="checkbox"
+              checked={progress.autoTargetEnabled}
+              onChange={(e) => playerProgress.setAutoTarget(e.target.checked)}
+            />
+          </label>
+        ) : (
+          <span style={ownedLabelStyle}>Owned</span>
+        )
       ) : (
         <button style={buttonStyle(affordable)} disabled={!affordable} onClick={() => playerProgress.purchaseUpgrade(upgrade.id, upgrade.cost)}>
           {formatCost(upgrade.cost)}
@@ -390,14 +496,68 @@ const buildingDescStyle: CSSProperties = { fontSize: 12, opacity: 0.7, marginTop
 const upgradeDescStyle: CSSProperties = { fontSize: 11, opacity: 0.65, marginTop: 2, maxWidth: 340 };
 const ownedLabelStyle: CSSProperties = { fontSize: 12, opacity: 0.6 };
 
-const toggleRowStyle: CSSProperties = {
+const inlineToggleStyle: CSSProperties = {
+  display: 'flex',
+  alignItems: 'center',
+  gap: 6,
+  cursor: 'pointer',
+};
+
+const modalHeaderStyle: CSSProperties = {
   display: 'flex',
   alignItems: 'center',
   justifyContent: 'space-between',
-  padding: '6px 10px',
-  background: 'rgba(255,255,255,0.05)',
+  gap: 12,
+};
+
+const closeButtonStyle: CSSProperties = {
+  padding: '4px 10px',
+  background: 'rgba(255,255,255,0.06)',
+  border: '1px solid rgba(232,217,168,0.3)',
   borderRadius: 6,
+  color: '#e8d9a8',
   cursor: 'pointer',
+  fontFamily: 'Spectral, serif',
+  fontSize: 12,
+};
+
+const goldPillStyle: CSSProperties = {
+  position: 'fixed',
+  top: 12,
+  right: 12,
+  pointerEvents: 'none',
+  background: 'rgba(0,0,0,0.55)',
+  border: '1px solid rgba(232,217,168,0.4)',
+  borderRadius: 6,
+  padding: '4px 10px',
+  color: '#e8d9a8',
+  fontFamily: 'Cinzel, serif',
+  fontSize: 13,
+  letterSpacing: '0.05em',
+  textTransform: 'uppercase',
+};
+
+const hudButtonStackStyle: CSSProperties = {
+  position: 'fixed',
+  top: 46,
+  right: 12,
+  display: 'flex',
+  flexDirection: 'column',
+  gap: 6,
+  alignItems: 'flex-end',
+};
+
+const hudButtonStyle: CSSProperties = {
+  pointerEvents: 'auto',
+  padding: '4px 10px',
+  background: 'rgba(0,0,0,0.55)',
+  border: '1px solid rgba(232,217,168,0.4)',
+  borderRadius: 6,
+  color: '#e8d9a8',
+  fontFamily: 'Spectral, serif',
+  fontSize: 12,
+  cursor: 'pointer',
+  whiteSpace: 'nowrap',
 };
 
 const devWrapStyle: CSSProperties = {
