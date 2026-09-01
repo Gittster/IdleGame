@@ -9,6 +9,8 @@ import '@fontsource/spectral/600.css';
 import '@fontsource/spectral/700.css';
 import { BootScene } from './game/scenes/BootScene';
 import { CombatScene } from './game/scenes/CombatScene';
+import { TownScene } from './game/scenes/TownScene';
+import { mountUI } from './ui/mount';
 
 const game = new Phaser.Game({
   type: Phaser.AUTO,
@@ -30,12 +32,14 @@ const game = new Phaser.Game({
   input: {
     activePointers: 3,
   },
-  scene: [BootScene, CombatScene],
+  scene: [BootScene, CombatScene, TownScene],
 });
 
 if (import.meta.env.DEV) {
   (window as unknown as { __game: Phaser.Game }).__game = game;
 }
+
+mountUI();
 
 // Mobile Safari/Chrome fire 'orientationchange' before window.innerWidth/
 // innerHeight have actually settled on the new orientation's values — read

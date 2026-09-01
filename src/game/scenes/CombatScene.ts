@@ -1,19 +1,23 @@
 import Phaser from 'phaser';
-import { CombatWorld } from '../../sim/core/combatWorld';
+import { CombatWorld, type GroundDrop } from '../../sim/core/combatWorld';
 import { WORLD_TUNING } from '../../sim/core/tuning';
 import { Team, type InputFrame } from '../../sim/core/types';
 import { POWER_BOLT } from '../../data/skills';
-import { ZONES, type ZoneDef } from '../../data/zones';
+import { ITEMS } from '../../data/items';
+import { ZONES, FIRST_ZONE, type ZoneDef } from '../../data/zones';
 import type { EnemyState } from '../../sim/core/entities';
 import { InputManager } from '../input/InputManager';
 import { ProjectileRenderer } from '../render/ProjectileRenderer';
 import { Juice } from '../render/Juice';
 import { GAME_CONFIG } from '../config';
 import { TEXT_STYLES } from '../ui/theme';
+import { playerProgress } from '../state/session';
+import { sceneBridge } from '../state/sceneBridge';
 
 const FIXED_DT = WORLD_TUNING.fixedDtMs / 1000;
 const SKILL_BUTTON_RADIUS = 34;
 const FULLSCREEN_BUTTON_RADIUS = 22;
+const TOWN_BUTTON_RADIUS = 30;
 const MAX_ENEMY_INDICATORS = 14;
 const INDICATOR_EDGE_MARGIN = 28;
 const OBSTACLE_FILL = 0x8a8578;
@@ -28,6 +32,7 @@ export class CombatScene extends Phaser.Scene {
   private zoneGraphics!: Phaser.GameObjects.Graphics;
   private playerSprite!: Phaser.GameObjects.Image;
   private enemySprites = new Map<number, Phaser.GameObjects.Image>();
+  private dropSprites = new Map<number, Phaser.GameObjects.Image>();
   private enemyIndicators: Phaser.GameObjects.Image[] = [];
 
   private hpBarFill!: Phaser.GameObjects.Rectangle;
@@ -43,6 +48,9 @@ export class CombatScene extends Phaser.Scene {
   private fullscreenButtonPos = { x: 0, y: 0 };
   private fullscreenButton?: Phaser.GameObjects.Text;
 
+  private townButtonPos = { x: 0, y: 0 };
+  private townButton!: Phaser.GameObjects.Text;
+
   private accumulator = 0;
   private hitStopRemainingMs = 0;
   /** Preserves facing when the aim input is momentarily neutral (e.g. a
@@ -53,8 +61,10 @@ export class CombatScene extends Phaser.Scene {
     super('Combat');
   }
 
-  create(): void {
-    this.world = new CombatWorld();
+  create(data: { zoneId?: string } = {}): void {
+    const zone = (data.zoneId && ZONES[data.zoneId]) || FIRST_ZONE;
+    this.world = new CombatWorld(zone, playerProgress);
+    sceneBridge.setScreen('combat');
     this.inputs = new InputManager(this);
     this.juice = new Juice(this, 'tex-spark');
 
@@ -128,6 +138,10 @@ export class CombatScene extends Phaser.Scene {
         this.toggleFullscreen();
         return;
       }
+      if (this.isWithin(p, this.townButtonPos, TOWN_BUTTON_RADIUS)) {
+        this.goToTown();
+        return;
+      }
       if (this.isWithin(p, this.skillButtonPos, SKILL_BUTTON_RADIUS)) {
         this.inputs.requestSkillCast(POWER_BOLT.id);
         return;
@@ -159,6 +173,9 @@ export class CombatScene extends Phaser.Scene {
       this.fullscreenButtonPos = this.fullscreenButtonCenter();
       this.fullscreenButton.setPosition(this.fullscreenButtonPos.x, this.fullscreenButtonPos.y);
     }
+
+    this.townButtonPos = this.townButtonCenter();
+    this.townButton.setPosition(this.townButtonPos.x, this.townButtonPos.y);
 
     this.zoneBanner.setPosition(this.scale.width / 2, this.scale.height / 2);
   }
@@ -239,8 +256,8 @@ export class CombatScene extends Phaser.Scene {
       .setDepth(100);
 
     const instructions = this.inputs.isTouch
-      ? 'left stick: move · right stick: aim & fire\ntap the skill icon, then tap a target'
-      : 'WASD move · mouse aim · click/space fire\nQ or click the skill icon to cast at cursor · T = stress test';
+      ? 'left stick: move · right stick: aim & fire\ntap the skill icon, then tap a target · tap TOWN to head back'
+      : 'WASD move · mouse aim · click/space fire\nQ or click the skill icon to cast at cursor · T = stress test · TOWN to head back';
     const instructionsText = this.add
       .text(16, this.zoneStatusText.y + this.zoneStatusText.height + 6, instructions, { ...TEXT_STYLES.bodyMuted, fontSize: '12px' })
       .setScrollFactor(0)
@@ -260,6 +277,7 @@ export class CombatScene extends Phaser.Scene {
 
     this.buildSkillButton();
     this.buildFullscreenButton();
+    this.buildTownButton();
   }
 
   private buildSkillButton(): void {
@@ -287,6 +305,28 @@ export class CombatScene extends Phaser.Scene {
 
   private fullscreenButtonCenter(): { x: number; y: number } {
     return { x: this.scale.width - 16 - FULLSCREEN_BUTTON_RADIUS, y: 16 + FULLSCREEN_BUTTON_RADIUS };
+  }
+
+  /** Always visible (unlike the fullscreen toggle, which needs browser
+   *  support) — a manual way back to Town without waiting for a full zone
+   *  clear, so cashing in loot mid-run doesn't require dying or grinding
+   *  out the whole kill quota. */
+  private buildTownButton(): void {
+    this.townButtonPos = this.townButtonCenter();
+    this.townButton = this.add
+      .text(this.townButtonPos.x, this.townButtonPos.y, 'TOWN', {
+        ...TEXT_STYLES.bodyMuted,
+        fontSize: '12px',
+        backgroundColor: '#00000080',
+        padding: { x: 8, y: 4 },
+      })
+      .setOrigin(0.5)
+      .setScrollFactor(0)
+      .setDepth(150);
+  }
+
+  private townButtonCenter(): { x: number; y: number } {
+    return { x: this.scale.width - 16 - TOWN_BUTTON_RADIUS, y: 16 + FULLSCREEN_BUTTON_RADIUS * 2 + 24 };
   }
 
   update(_time: number, delta: number): void {
@@ -357,39 +397,40 @@ export class CombatScene extends Phaser.Scene {
       if (fired.team === Team.Player) this.juice.punchScale(this.playerSprite, 0.18, 70);
     }
 
+    for (const drop of events.dropsSpawned) this.addDropSprite(drop);
+    for (const drop of events.dropsCollected) this.removeDropSprite(drop);
+
     if (events.zoneCleared) this.onZoneCleared();
   }
 
+  private addDropSprite(drop: GroundDrop): void {
+    const texture = drop.kind === 'gold' ? 'tex-gold-drop' : 'tex-item-drop';
+    const sprite = this.add.image(drop.x, drop.y, texture).setDepth(6);
+    if (drop.kind === 'item') sprite.setTint(ITEMS[drop.itemId!]!.color);
+    this.dropSprites.set(drop.id, sprite);
+  }
+
+  private removeDropSprite(drop: GroundDrop): void {
+    const sprite = this.dropSprites.get(drop.id);
+    if (!sprite) return;
+    const tint = drop.kind === 'gold' ? 0xffd23f : ITEMS[drop.itemId!]!.color;
+    this.juice.hitSpark(sprite.x, sprite.y, tint, 8);
+    sprite.destroy();
+    this.dropSprites.delete(drop.id);
+  }
+
+  /** Clearing a zone unlocks the next one (if any) and heads back to
+   *  Town — the "zone, loot, town" loop's return leg — rather than
+   *  auto-chaining straight into the next zone. */
   private onZoneCleared(): void {
     const zone = this.world.currentZone;
+    if (zone.nextZoneId) playerProgress.unlockZone(zone.nextZoneId);
     this.zoneBanner.setText(`${zone.name}\nCleared!`).setVisible(true);
-    this.time.delayedCall(GAME_CONFIG.zoneClearedBannerMs, () => this.advanceZone());
+    this.time.delayedCall(GAME_CONFIG.zoneClearedBannerMs, () => this.goToTown());
   }
 
-  private advanceZone(): void {
-    const nextZoneId = this.world.currentZone.nextZoneId;
-    const nextZone = nextZoneId ? ZONES[nextZoneId] : undefined;
-    if (!nextZone) {
-      this.zoneBanner.setText('No further zones yet —\nmore coming soon!');
-      return;
-    }
-    this.transitionToZone(nextZone);
-  }
-
-  private transitionToZone(zone: ZoneDef): void {
-    this.world.loadZone(zone);
-
-    for (const sprite of this.enemySprites.values()) sprite.destroy();
-    this.enemySprites.clear();
-
-    this.drawZoneVisuals(zone);
-    this.setCameraBoundsForZone(zone);
-
-    for (let i = 0; i < zone.maxAlive; i++) {
-      this.spawnEnemyInZone(this.world.player.x, this.world.player.y);
-    }
-
-    this.zoneBanner.setVisible(false);
+  private goToTown(): void {
+    this.scene.start('Town');
   }
 
   private render(alpha: number): void {

@@ -2,9 +2,11 @@ import { describe, it, expect } from 'vitest';
 import { CombatWorld } from '../core/combatWorld';
 import type { InputFrame } from '../core/types';
 import { DUMMY } from '../../data/monsters';
+import type { MonsterDef } from '../../data/monsters';
 import { POWER_BOLT } from '../../data/skills';
 import { PLAYER_TUNING, WORLD_TUNING } from '../core/tuning';
 import type { ZoneDef } from '../../data/zones';
+import { PlayerProgress } from '../core/playerProgress';
 
 function noInput(): InputFrame {
   return { moveX: 0, moveY: 0, aimX: 1, aimY: 0, firing: false, skillCasts: [] };
@@ -25,6 +27,17 @@ function makeZone(overrides: Partial<ZoneDef> = {}): ZoneDef {
     nextZoneId: null,
     groundColor: 0xffffff,
     outlineColor: 0x000000,
+    ...overrides,
+  };
+}
+
+/** A guaranteed-drop monster fixture — the real monsters' drop chances
+ *  are <100%, which would make loot tests flaky. */
+function makeLootMonster(overrides: Partial<MonsterDef> = {}): MonsterDef {
+  return {
+    ...DUMMY,
+    goldDrop: { min: 5, max: 5 },
+    lootTable: [{ itemId: 'crab-shell', chance: 1, min: 2, max: 2 }],
     ...overrides,
   };
 }
@@ -215,5 +228,44 @@ describe('CombatWorld', () => {
     expect(world.player.x).toBe(500);
     expect(world.player.y).toBe(500);
     expect(world.player.hp).toBe(world.player.maxHp);
+  });
+
+  it('drops gold and loot-table items on a kill, added to progress once the player walks over them', () => {
+    const zone = makeZone({ monster: makeLootMonster(), playerSpawn: { x: 0, y: 0 } });
+    const world = new CombatWorld(zone);
+    const enemy = world.spawnEnemy(zone.monster, 70, 0);
+    enemy.hp = 1;
+
+    world.step(1 / 60, { ...noInput(), aimX: 1, aimY: 0, firing: true });
+    for (let i = 0; i < 10 && world.enemies.length > 0; i++) world.step(1 / 60, noInput());
+
+    // The kill spot is well outside pickup range of the still-stationary player.
+    expect(world.groundDrops.length).toBeGreaterThan(0);
+    expect(world.progress.gold).toBe(0);
+
+    for (let i = 0; i < 60 && world.groundDrops.length > 0; i++) {
+      world.step(1 / 60, { ...noInput(), moveX: 1, moveY: 0 });
+    }
+
+    expect(world.groundDrops).toHaveLength(0);
+    expect(world.progress.gold).toBe(5);
+    expect(world.progress.inventory.slots.some((s) => s?.itemId === 'crab-shell' && s.qty === 2)).toBe(true);
+  });
+
+  it('leaves an item drop on the ground (with its remaining qty) when the inventory has no room for it', () => {
+    const monster = makeLootMonster({ goldDrop: { min: 0, max: 0 } });
+    const zone = makeZone({ monster, playerSpawn: { x: 0, y: 0 } });
+    const progress = new PlayerProgress(zone.id, 1);
+    progress.inventory.addItem('ash-cinder', 1, 20); // fills the only slot with a different item
+    const world = new CombatWorld(zone, progress);
+    const enemy = world.spawnEnemy(zone.monster, 70, 0);
+    enemy.hp = 1;
+
+    world.step(1 / 60, { ...noInput(), aimX: 1, aimY: 0, firing: true });
+    for (let i = 0; i < 10 && world.enemies.length > 0; i++) world.step(1 / 60, noInput());
+    for (let i = 0; i < 60; i++) world.step(1 / 60, { ...noInput(), moveX: 1, moveY: 0 });
+
+    expect(world.groundDrops.some((d) => d.kind === 'item' && d.itemId === 'crab-shell')).toBe(true);
+    expect(progress.inventory.slots.every((s) => s?.itemId !== 'crab-shell')).toBe(true);
   });
 });

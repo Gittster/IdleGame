@@ -21,6 +21,8 @@ export class BootScene extends Phaser.Scene {
     // reads as "that should have hit" when it doesn't (or vice versa).
     this.makeCircleTexture('tex-projectile', BASIC_ATTACK_TUNING.projectileRadius, 0xffffff, 0xffffff);
     this.makeCircleTexture('tex-spark', 3, 0xffffff, 0xffffff);
+    this.makeCircleTexture('tex-gold-drop', 8, 0xffd23f, 0x8a6a1a);
+    this.makeItemDropTexture();
     this.makeIndicatorTexture();
 
     this.waitForFonts().then(() => this.scene.start('Combat'));
@@ -51,6 +53,26 @@ export class BootScene extends Phaser.Scene {
     g.fillStyle(0xffffff, 1);
     g.fillTriangle(2, 2, 2, h - 2, w - 2, h / 2);
     g.generateTexture('tex-indicator', w, h);
+    g.destroy();
+  }
+
+  /** A generic diamond shape for item drops — tinted per-item at render
+   *  time (see CombatScene), so one texture covers every item in
+   *  src/data/items.ts without needing per-item art yet. */
+  private makeItemDropTexture(): void {
+    const size = 20;
+    const g = this.add.graphics();
+    g.fillStyle(0xffffff, 1);
+    g.lineStyle(2, 0x141414, 1);
+    g.beginPath();
+    g.moveTo(size / 2, 1);
+    g.lineTo(size - 1, size / 2);
+    g.lineTo(size / 2, size - 1);
+    g.lineTo(1, size / 2);
+    g.closePath();
+    g.fillPath();
+    g.strokePath();
+    g.generateTexture('tex-item-drop', size, size);
     g.destroy();
   }
 

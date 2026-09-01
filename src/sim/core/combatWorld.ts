@@ -5,9 +5,22 @@ import { SpatialHash } from './spatialHash';
 import { sweptCircleHitsCircle } from './collision';
 import { clampToEllipse, pushOutOfCircle } from './zoneGeometry';
 import { createPlayer, createEnemy, type PlayerState, type EnemyState } from './entities';
+import { PlayerProgress } from './playerProgress';
 import type { MonsterDef } from '../../data/monsters';
 import { SKILLS } from '../../data/skills';
+import { ITEMS } from '../../data/items';
 import { FIRST_ZONE, type ZoneDef } from '../../data/zones';
+
+/** A pickup lying in the zone at a fixed world position until the player
+ *  walks over it or it's carried into the next zone's reset. */
+export interface GroundDrop {
+  id: number;
+  x: number;
+  y: number;
+  kind: 'gold' | 'item';
+  itemId?: string;
+  qty: number;
+}
 
 export interface HitEvent {
   x: number;
@@ -33,6 +46,8 @@ export class FrameEvents {
   readonly enemyDied: EnemyState[] = [];
   readonly skillCasts: SkillCastEvent[] = [];
   readonly fired: { x: number; y: number; team: Team }[] = [];
+  readonly dropsSpawned: GroundDrop[] = [];
+  readonly dropsCollected: GroundDrop[] = [];
   /** True only on the tick the zone's kill quota hits zero. */
   zoneCleared = false;
 
@@ -41,6 +56,8 @@ export class FrameEvents {
     this.enemyDied.length = 0;
     this.skillCasts.length = 0;
     this.fired.length = 0;
+    this.dropsSpawned.length = 0;
+    this.dropsCollected.length = 0;
     this.zoneCleared = false;
   }
 }
@@ -49,20 +66,24 @@ export class CombatWorld {
   readonly player: PlayerState;
   readonly enemies: EnemyState[] = [];
   readonly projectiles: ProjectilePool;
+  readonly groundDrops: GroundDrop[] = [];
   readonly events = new FrameEvents();
+  readonly progress: PlayerProgress;
 
   currentZone: ZoneDef;
   killsRemaining: number;
 
   private readonly enemyHash: SpatialHash;
   private readonly neighborBuf: number[] = [];
+  private nextDropId = 1;
 
-  constructor(zone: ZoneDef = FIRST_ZONE) {
+  constructor(zone: ZoneDef = FIRST_ZONE, progress: PlayerProgress = new PlayerProgress(zone.id)) {
     this.currentZone = zone;
     this.killsRemaining = zone.killsToClear;
     this.player = createPlayer(zone.playerSpawn.x, zone.playerSpawn.y, PLAYER_TUNING.maxHp);
     this.projectiles = new ProjectilePool(WORLD_TUNING.projectileCapacity);
     this.enemyHash = new SpatialHash(WORLD_TUNING.hashCellSize);
+    this.progress = progress;
   }
 
   get isZoneCleared(): boolean {
@@ -81,6 +102,7 @@ export class CombatWorld {
     this.killsRemaining = zone.killsToClear;
     this.enemies.length = 0;
     this.projectiles.clear();
+    this.groundDrops.length = 0;
 
     const p = this.player;
     p.x = zone.playerSpawn.x;
@@ -112,6 +134,7 @@ export class CombatWorld {
     this.stepEnemies(dt);
     this.projectiles.integrate(dt);
     this.resolveCollisions();
+    this.resolvePickups();
   }
 
   private resolveObstacles(x: number, y: number, radius: number): { x: number; y: number } {
@@ -291,6 +314,7 @@ export class CombatWorld {
         dead.alive = false;
         this.events.enemyDied.push(dead);
         this.removeEnemyAt(i);
+        this.spawnLootFor(dead);
 
         if (this.killsRemaining > 0) {
           this.killsRemaining--;
@@ -298,6 +322,70 @@ export class CombatWorld {
         }
       }
     }
+  }
+
+  /** Rolls the current zone's monster's gold + loot table on a kill and
+   *  drops the results at the death spot, scattered a little so multiple
+   *  drops from one kill don't fully overlap. */
+  private spawnLootFor(dead: EnemyState): void {
+    const monster = this.currentZone.monster;
+    const scatter = () => (Math.random() - 0.5) * 30;
+
+    const gold = randInt(monster.goldDrop.min, monster.goldDrop.max);
+    if (gold > 0) {
+      const drop: GroundDrop = { id: this.nextDropId++, x: dead.x + scatter(), y: dead.y + scatter(), kind: 'gold', qty: gold };
+      this.groundDrops.push(drop);
+      this.events.dropsSpawned.push(drop);
+    }
+
+    for (const entry of monster.lootTable) {
+      if (Math.random() >= entry.chance) continue;
+      const drop: GroundDrop = {
+        id: this.nextDropId++,
+        x: dead.x + scatter(),
+        y: dead.y + scatter(),
+        kind: 'item',
+        itemId: entry.itemId,
+        qty: randInt(entry.min, entry.max),
+      };
+      this.groundDrops.push(drop);
+      this.events.dropsSpawned.push(drop);
+    }
+  }
+
+  /** Collects any ground drop within pickup range of the player into
+   *  `progress`. An item drop that doesn't fully fit is left on the
+   *  ground with its remaining quantity rather than vanishing. */
+  private resolvePickups(): void {
+    const p = this.player;
+    const pickupDist = WORLD_TUNING.pickupRadius + PLAYER_TUNING.radius;
+
+    for (let i = this.groundDrops.length - 1; i >= 0; i--) {
+      const drop = this.groundDrops[i]!;
+      const dx = drop.x - p.x;
+      const dy = drop.y - p.y;
+      if (dx * dx + dy * dy > pickupDist * pickupDist) continue;
+
+      if (drop.kind === 'gold') {
+        this.progress.addGold(drop.qty);
+      } else {
+        const item = ITEMS[drop.itemId!]!;
+        const leftover = this.progress.addItem(drop.itemId!, drop.qty, item.maxStack);
+        if (leftover > 0) {
+          drop.qty = leftover;
+          continue;
+        }
+      }
+
+      this.events.dropsCollected.push(drop);
+      this.removeGroundDropAt(i);
+    }
+  }
+
+  private removeGroundDropAt(i: number): void {
+    const last = this.groundDrops.length - 1;
+    if (i !== last) this.groundDrops[i] = this.groundDrops[last]!;
+    this.groundDrops.pop();
   }
 
   /** A projectile that hits static zone geometry is destroyed, no damage
@@ -395,4 +483,8 @@ export class CombatWorld {
 function moveToward(current: number, target: number, maxDelta: number): number {
   if (Math.abs(target - current) <= maxDelta) return target;
   return current + Math.sign(target - current) * maxDelta;
+}
+
+function randInt(min: number, max: number): number {
+  return Math.floor(min + Math.random() * (max - min + 1));
 }

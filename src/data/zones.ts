@@ -1,5 +1,5 @@
 import type { MonsterDef } from './monsters';
-import { DUMMY } from './monsters';
+import { SHORE_CRAB, ASH_WRETCH } from './monsters';
 import type { EllipseBounds, CircleObstacle } from '../sim/core/zoneGeometry';
 
 /**
@@ -37,7 +37,7 @@ export const SUNKEN_SHORE: ZoneDef = {
   bounds: { centerX: 700, centerY: 500, radiusX: 420, radiusY: 300 },
   playerSpawn: { x: 880, y: 420 },
   obstacles: [{ x: 560, y: 560, radius: 60 }],
-  monster: DUMMY,
+  monster: SHORE_CRAB,
   maxAlive: 4,
   killsToClear: 15,
   nextZoneId: 'ashen-flats',
@@ -51,7 +51,7 @@ export const ASHEN_FLATS: ZoneDef = {
   bounds: { centerX: 700, centerY: 500, radiusX: 520, radiusY: 360 },
   playerSpawn: { x: 700, y: 500 },
   obstacles: [],
-  monster: DUMMY,
+  monster: ASH_WRETCH,
   maxAlive: 5,
   killsToClear: 20,
   nextZoneId: null,

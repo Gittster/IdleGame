@@ -33,10 +33,21 @@
         image-rendering: pixelated;
         touch-action: none;
       }
+      /* Sits over the Phaser canvas for the Town/inventory UI. Left
+         click-through (pointer-events: none) by default so it never
+         swallows combat input — individual React components opt back
+         into pointer-events: auto where they're actually interactive. */
+      #ui-root {
+        position: fixed;
+        inset: 0;
+        pointer-events: none;
+        z-index: 10;
+      }
     </style>
   </head>
   <body>
     <div id="app"></div>
+    <div id="ui-root"></div>
     <script type="module" src="/src/main.ts"></script>
   </body>
 </html>

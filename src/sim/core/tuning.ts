@@ -12,6 +12,9 @@ export const WORLD_TUNING = {
   projectileCapacity: 4096,
   /** Spatial hash cell size for enemy broadphase queries. */
   hashCellSize: 96,
+  /** How close (in addition to the player's own radius) the player must
+   *  be to a ground drop to auto-collect it. */
+  pickupRadius: 30,
 };
 
 export const PLAYER_TUNING = {
