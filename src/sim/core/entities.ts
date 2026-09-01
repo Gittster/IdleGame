@@ -14,10 +14,8 @@ export interface PlayerState {
   /** Set when a fire request arrives slightly before the weapon is ready;
    *  consumed the instant cooldown clears so inputs never get "eaten". */
   fireBuffer: number;
-  dashCooldown: number;
-  dashTimer: number;
-  dashDirX: number;
-  dashDirY: number;
+  /** Remaining cooldown per skill id; absent/0 means ready. */
+  skillCooldowns: Record<string, number>;
 }
 
 export function createPlayer(x: number, y: number, maxHp: number): PlayerState {
@@ -35,10 +33,7 @@ export function createPlayer(x: number, y: number, maxHp: number): PlayerState {
     iFrameTimer: 0,
     attackCooldown: 0,
     fireBuffer: 0,
-    dashCooldown: 0,
-    dashTimer: 0,
-    dashDirX: 0,
-    dashDirY: 0,
+    skillCooldowns: {},
   };
 }
 

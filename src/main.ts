@@ -2,7 +2,7 @@ import Phaser from 'phaser';
 import { BootScene } from './game/scenes/BootScene';
 import { CombatScene } from './game/scenes/CombatScene';
 
-new Phaser.Game({
+const game = new Phaser.Game({
   type: Phaser.AUTO,
   parent: 'app',
   width: 1024,
@@ -19,3 +19,7 @@ new Phaser.Game({
   },
   scene: [BootScene, CombatScene],
 });
+
+if (import.meta.env.DEV) {
+  (window as unknown as { __game: Phaser.Game }).__game = game;
+}

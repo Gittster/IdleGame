@@ -2,10 +2,11 @@ import { describe, it, expect } from 'vitest';
 import { CombatWorld } from '../core/combatWorld';
 import type { InputFrame } from '../core/types';
 import { DUMMY } from '../../data/monsters';
+import { POWER_BOLT } from '../../data/skills';
 import { PLAYER_TUNING, WORLD_TUNING } from '../core/tuning';
 
 function noInput(): InputFrame {
-  return { moveX: 0, moveY: 0, aimX: 1, aimY: 0, firing: false, dashRequested: false };
+  return { moveX: 0, moveY: 0, aimX: 1, aimY: 0, firing: false, skillCasts: [] };
 }
 
 describe('CombatWorld', () => {
@@ -54,12 +55,28 @@ describe('CombatWorld', () => {
     expect(world.events.enemyDied.length + world.events.hits.length).toBeGreaterThan(0);
   });
 
-  it('dash briefly grants a large speed boost then returns to normal movement', () => {
+  it('casts a skill toward the tapped target on request', () => {
     const world = new CombatWorld();
-    const startX = world.player.x;
-    world.step(1 / 60, { ...noInput(), dashRequested: true }, DUMMY);
-    expect(Math.abs(world.player.vx)).toBeGreaterThan(PLAYER_TUNING.maxSpeed);
-    expect(world.player.x).not.toBe(startX);
+    const target = { x: world.player.x + 100, y: world.player.y };
+    world.step(1 / 60, { ...noInput(), skillCasts: [{ skillId: POWER_BOLT.id, targetX: target.x, targetY: target.y }] }, DUMMY);
+    expect(world.projectiles.count).toBe(1);
+    expect(world.projectiles.vx[0]).toBeGreaterThan(0);
+    expect(world.projectiles.damage[0]).toBe(POWER_BOLT.damage);
+    expect(world.player.skillCooldowns[POWER_BOLT.id]).toBe(POWER_BOLT.cooldown);
+  });
+
+  it('drops a skill cast request while the skill is on cooldown', () => {
+    const world = new CombatWorld();
+    const cast = { skillId: POWER_BOLT.id, targetX: world.player.x + 100, targetY: world.player.y };
+    world.step(1 / 60, { ...noInput(), skillCasts: [cast] }, DUMMY);
+    world.step(1 / 60, { ...noInput(), skillCasts: [cast] }, DUMMY);
+    expect(world.projectiles.count).toBe(1);
+  });
+
+  it('ignores a cast request for an unknown skill id', () => {
+    const world = new CombatWorld();
+    world.step(1 / 60, { ...noInput(), skillCasts: [{ skillId: 'not_a_skill', targetX: 0, targetY: 0 }] }, DUMMY);
+    expect(world.projectiles.count).toBe(0);
   });
 
   it('keeps the player within arena bounds', () => {

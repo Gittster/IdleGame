@@ -26,12 +26,6 @@ export const PLAYER_TUNING = {
   deceleration: 4200,
   maxHp: 100,
   iFrameDuration: 0.5,
-  dash: {
-    speed: 900,
-    duration: 0.14,
-    cooldown: 0.8,
-    iFrames: true,
-  },
 };
 
 export const BASIC_ATTACK_TUNING = {
@@ -44,4 +38,5 @@ export const BASIC_ATTACK_TUNING = {
   projectileLife: 0.9,
   damage: 8,
   pierce: 0,
+  tint: 0xffe066,
 };

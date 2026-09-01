@@ -12,6 +12,7 @@ export interface MonsterDef {
     damage: number;
     life: number;
     cooldown: number;
+    tint: number;
   };
 }
 
@@ -27,5 +28,6 @@ export const DUMMY: MonsterDef = {
     damage: 6,
     life: 2.5,
     cooldown: 2.2,
+    tint: 0xff5566,
   },
 };

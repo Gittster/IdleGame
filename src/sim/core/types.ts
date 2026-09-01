@@ -8,13 +8,23 @@ export const enum Team {
   Enemy = 1,
 }
 
+export interface SkillCastRequest {
+  skillId: string;
+  targetX: number;
+  targetY: number;
+}
+
 export interface InputFrame {
   moveX: number;
   moveY: number;
   aimX: number;
   aimY: number;
   firing: boolean;
-  dashRequested: boolean;
+  /** Usually empty; a targeted skill button/tap produces one entry for the
+   *  tick it was confirmed on. Dropped by the sim if the skill is still on
+   *  cooldown — casting is a deliberate targeted action, not something
+   *  worth buffering the way the held-fire basic attack is. */
+  skillCasts: SkillCastRequest[];
 }
 
 export function normalize(v: Vec2): Vec2 {

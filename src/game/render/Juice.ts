@@ -42,19 +42,4 @@ export class Juice {
       ease: Phaser.Math.Easing.Sine.Out,
     });
   }
-
-  dashGhost(x: number, y: number, rotation: number, textureKey: string, tint: number): void {
-    const ghost = this.scene.add.image(x, y, textureKey);
-    ghost.setRotation(rotation);
-    ghost.setTint(tint);
-    ghost.setAlpha(0.45);
-    ghost.setDepth(5);
-    this.scene.tweens.add({
-      targets: ghost,
-      alpha: 0,
-      duration: 220,
-      ease: Phaser.Math.Easing.Quadratic.Out,
-      onComplete: () => ghost.destroy(),
-    });
-  }
 }

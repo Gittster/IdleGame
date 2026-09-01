@@ -1,9 +1,5 @@
 import Phaser from 'phaser';
 import type { ProjectilePool } from '../../sim/core/projectilePool';
-import { Team } from '../../sim/core/types';
-
-const PLAYER_TINT = 0xffe066;
-const ENEMY_TINT = 0xff5566;
 
 /**
  * Renders the entire projectile pool through a single Blitter — Phaser's
@@ -38,7 +34,7 @@ export class ProjectileRenderer {
       bob.visible = true;
       bob.x = lerp(pool.prevX[i]!, pool.x[i]!, alpha);
       bob.y = lerp(pool.prevY[i]!, pool.y[i]!, alpha);
-      bob.tint = pool.team[i] === Team.Player ? PLAYER_TINT : ENEMY_TINT;
+      bob.tint = pool.tint[i]!;
     }
   }
 }

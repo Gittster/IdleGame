@@ -3,7 +3,7 @@ import { ProjectilePool } from '../core/projectilePool';
 import { Team } from '../core/types';
 
 function spawnAt(pool: ProjectilePool, x: number, life = 1): number {
-  return pool.spawn({ x, y: 0, vx: 10, vy: 0, radius: 4, damage: 1, life, team: Team.Player, pierce: 0 });
+  return pool.spawn({ x, y: 0, vx: 10, vy: 0, radius: 4, damage: 1, life, team: Team.Player, pierce: 0, tint: 0xffffff });
 }
 
 describe('ProjectilePool', () => {

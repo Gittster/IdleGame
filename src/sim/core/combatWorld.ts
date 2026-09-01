@@ -5,6 +5,7 @@ import { SpatialHash } from './spatialHash';
 import { sweptCircleHitsCircle } from './collision';
 import { createPlayer, createEnemy, type PlayerState, type EnemyState } from './entities';
 import type { MonsterDef } from '../../data/monsters';
+import { SKILLS } from '../../data/skills';
 
 export interface HitEvent {
   x: number;
@@ -14,7 +15,8 @@ export interface HitEvent {
   killed: boolean;
 }
 
-export interface DashEvent {
+export interface SkillCastEvent {
+  skillId: string;
   x: number;
   y: number;
   dirX: number;
@@ -27,13 +29,13 @@ export interface DashEvent {
 export class FrameEvents {
   readonly hits: HitEvent[] = [];
   readonly enemyDied: EnemyState[] = [];
-  readonly dashes: DashEvent[] = [];
+  readonly skillCasts: SkillCastEvent[] = [];
   readonly fired: { x: number; y: number; team: Team }[] = [];
 
   clear(): void {
     this.hits.length = 0;
     this.enemyDied.length = 0;
-    this.dashes.length = 0;
+    this.skillCasts.length = 0;
     this.fired.length = 0;
   }
 }
@@ -69,6 +71,7 @@ export class CombatWorld {
     this.events.clear();
     this.stepPlayerMovement(dt, input);
     this.stepPlayerAttack(dt, input);
+    this.stepPlayerSkills(dt, input);
     this.stepEnemies(dt, enemyDef);
     this.projectiles.integrate(dt);
     this.resolveCollisions();
@@ -82,33 +85,14 @@ export class CombatWorld {
     p.aimY = input.aimY;
 
     if (p.iFrameTimer > 0) p.iFrameTimer -= dt;
-    if (p.dashCooldown > 0) p.dashCooldown -= dt;
 
-    const dash = PLAYER_TUNING.dash;
-    if (input.dashRequested && p.dashCooldown <= 0 && p.dashTimer <= 0) {
-      const moveDir = normalize({ x: input.moveX, y: input.moveY });
-      const dir = moveDir.x !== 0 || moveDir.y !== 0 ? moveDir : normalize({ x: p.aimX, y: p.aimY });
-      p.dashDirX = dir.x;
-      p.dashDirY = dir.y;
-      p.dashTimer = dash.duration;
-      p.dashCooldown = dash.cooldown;
-      if (dash.iFrames) p.iFrameTimer = Math.max(p.iFrameTimer, dash.duration);
-      this.events.dashes.push({ x: p.x, y: p.y, dirX: dir.x, dirY: dir.y });
-    }
-
-    if (p.dashTimer > 0) {
-      p.dashTimer -= dt;
-      p.vx = p.dashDirX * dash.speed;
-      p.vy = p.dashDirY * dash.speed;
-    } else {
-      const dir = normalize({ x: input.moveX, y: input.moveY });
-      const targetVx = dir.x * PLAYER_TUNING.maxSpeed;
-      const targetVy = dir.y * PLAYER_TUNING.maxSpeed;
-      const hasInput = dir.x !== 0 || dir.y !== 0;
-      const rate = hasInput ? PLAYER_TUNING.acceleration : PLAYER_TUNING.deceleration;
-      p.vx = moveToward(p.vx, targetVx, rate * dt);
-      p.vy = moveToward(p.vy, targetVy, rate * dt);
-    }
+    const dir = normalize({ x: input.moveX, y: input.moveY });
+    const targetVx = dir.x * PLAYER_TUNING.maxSpeed;
+    const targetVy = dir.y * PLAYER_TUNING.maxSpeed;
+    const hasInput = dir.x !== 0 || dir.y !== 0;
+    const rate = hasInput ? PLAYER_TUNING.acceleration : PLAYER_TUNING.deceleration;
+    p.vx = moveToward(p.vx, targetVx, rate * dt);
+    p.vy = moveToward(p.vy, targetVy, rate * dt);
 
     p.x += p.vx * dt;
     p.y += p.vy * dt;
@@ -142,10 +126,44 @@ export class CombatWorld {
         life: BASIC_ATTACK_TUNING.projectileLife,
         team: Team.Player,
         pierce: BASIC_ATTACK_TUNING.pierce,
+        tint: BASIC_ATTACK_TUNING.tint,
       });
       this.events.fired.push({ x: p.x, y: p.y, team: Team.Player });
       p.attackCooldown = BASIC_ATTACK_TUNING.cooldown;
       p.fireBuffer = 0;
+    }
+  }
+
+  private stepPlayerSkills(dt: number, input: InputFrame): void {
+    const p = this.player;
+    for (const skillId in p.skillCooldowns) {
+      if (p.skillCooldowns[skillId]! > 0) p.skillCooldowns[skillId]! -= dt;
+    }
+
+    for (const cast of input.skillCasts) {
+      const def = SKILLS[cast.skillId];
+      if (!def) continue;
+      const remaining = p.skillCooldowns[def.id] ?? 0;
+      if (remaining > 0) continue;
+
+      const dir = normalize({ x: cast.targetX - p.x, y: cast.targetY - p.y });
+      const dirX = dir.x !== 0 || dir.y !== 0 ? dir.x : 1;
+      const dirY = dir.x !== 0 || dir.y !== 0 ? dir.y : 0;
+      const spawnDist = PLAYER_TUNING.radius + def.projectileRadius + 2;
+      this.projectiles.spawn({
+        x: p.x + dirX * spawnDist,
+        y: p.y + dirY * spawnDist,
+        vx: dirX * def.projectileSpeed,
+        vy: dirY * def.projectileSpeed,
+        radius: def.projectileRadius,
+        damage: def.damage,
+        life: def.projectileLife,
+        team: Team.Player,
+        pierce: def.pierce,
+        tint: def.tint,
+      });
+      p.skillCooldowns[def.id] = def.cooldown;
+      this.events.skillCasts.push({ skillId: def.id, x: p.x, y: p.y, dirX, dirY });
     }
   }
 
@@ -184,6 +202,7 @@ export class CombatWorld {
           life: def.projectile.life,
           team: Team.Enemy,
           pierce: 0,
+          tint: def.projectile.tint,
         });
         this.events.fired.push({ x: e.x, y: e.y, team: Team.Enemy });
       }

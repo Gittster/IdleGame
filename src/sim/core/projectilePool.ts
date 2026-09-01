@@ -25,6 +25,10 @@ export class ProjectilePool {
   readonly life: Float32Array;
   readonly team: Uint8Array;
   readonly pierce: Int16Array;
+  /** Render-only hint (a 0xRRGGBB color), so the sim stays the single
+   *  source of truth for "what does this projectile look like" instead of
+   *  the renderer guessing from team/radius. */
+  readonly tint: Uint32Array;
 
   count = 0;
   /** Incremented whenever a spawn is dropped because the pool is full. */
@@ -43,6 +47,7 @@ export class ProjectilePool {
     this.life = new Float32Array(capacity);
     this.team = new Uint8Array(capacity);
     this.pierce = new Int16Array(capacity);
+    this.tint = new Uint32Array(capacity);
   }
 
   spawn(params: {
@@ -55,6 +60,7 @@ export class ProjectilePool {
     life: number;
     team: Team;
     pierce: number;
+    tint: number;
   }): number {
     if (this.count >= this.capacity) {
       this.droppedSpawns++;
@@ -72,6 +78,7 @@ export class ProjectilePool {
     this.life[i] = params.life;
     this.team[i] = params.team;
     this.pierce[i] = params.pierce;
+    this.tint[i] = params.tint;
     return i;
   }
 
@@ -90,6 +97,7 @@ export class ProjectilePool {
       this.life[i] = this.life[last]!;
       this.team[i] = this.team[last]!;
       this.pierce[i] = this.pierce[last]!;
+      this.tint[i] = this.tint[last]!;
     }
     this.count--;
   }
