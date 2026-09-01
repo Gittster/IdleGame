@@ -4,9 +4,29 @@ import type { InputFrame } from '../core/types';
 import { DUMMY } from '../../data/monsters';
 import { POWER_BOLT } from '../../data/skills';
 import { PLAYER_TUNING, WORLD_TUNING } from '../core/tuning';
+import type { ZoneDef } from '../../data/zones';
 
 function noInput(): InputFrame {
   return { moveX: 0, moveY: 0, aimX: 1, aimY: 0, firing: false, skillCasts: [] };
+}
+
+/** A small, deterministic zone for tests that care about bounds/obstacles/
+ *  kill-counter behavior specifically, rather than the real production zone. */
+function makeZone(overrides: Partial<ZoneDef> = {}): ZoneDef {
+  return {
+    id: 'test-zone',
+    name: 'Test Zone',
+    bounds: { centerX: 0, centerY: 0, radiusX: 100, radiusY: 80 },
+    playerSpawn: { x: 0, y: 0 },
+    obstacles: [],
+    monster: DUMMY,
+    maxAlive: 4,
+    killsToClear: 3,
+    nextZoneId: null,
+    groundColor: 0xffffff,
+    outlineColor: 0x000000,
+    ...overrides,
+  };
 }
 
 describe('CombatWorld', () => {
@@ -14,7 +34,7 @@ describe('CombatWorld', () => {
     const world = new CombatWorld();
     const startX = world.player.x;
     for (let i = 0; i < 30; i++) {
-      world.step(1 / 60, { ...noInput(), moveX: 1, moveY: 0 }, DUMMY);
+      world.step(1 / 60, { ...noInput(), moveX: 1, moveY: 0 });
     }
     expect(world.player.x).toBeGreaterThan(startX);
     expect(world.player.vx).toBeGreaterThan(0);
@@ -23,14 +43,14 @@ describe('CombatWorld', () => {
 
   it('decelerates back to a stop once input is released', () => {
     const world = new CombatWorld();
-    for (let i = 0; i < 30; i++) world.step(1 / 60, { ...noInput(), moveX: 1 }, DUMMY);
-    for (let i = 0; i < 60; i++) world.step(1 / 60, noInput(), DUMMY);
+    for (let i = 0; i < 30; i++) world.step(1 / 60, { ...noInput(), moveX: 1 });
+    for (let i = 0; i < 60; i++) world.step(1 / 60, noInput());
     expect(Math.abs(world.player.vx)).toBeLessThan(1);
   });
 
   it('fires a projectile toward the aim direction on request', () => {
     const world = new CombatWorld();
-    world.step(1 / 60, { ...noInput(), aimX: 1, aimY: 0, firing: true }, DUMMY);
+    world.step(1 / 60, { ...noInput(), aimX: 1, aimY: 0, firing: true });
     expect(world.projectiles.count).toBe(1);
     expect(world.projectiles.vx[0]).toBeGreaterThan(0);
   });
@@ -38,7 +58,7 @@ describe('CombatWorld', () => {
   it('spawns the basic attack exactly at the player center, not offset toward the aim', () => {
     const world = new CombatWorld();
     const { x: px, y: py } = world.player;
-    world.step(1 / 60, { ...noInput(), aimX: 1, aimY: 0, firing: true }, DUMMY);
+    world.step(1 / 60, { ...noInput(), aimX: 1, aimY: 0, firing: true });
     // prevX/prevY hold the spawn position from before this tick's
     // integrate() advanced it — x/y have already moved by one tick.
     expect(world.projectiles.prevX[0]).toBe(px);
@@ -47,8 +67,8 @@ describe('CombatWorld', () => {
 
   it('respects the attack cooldown between shots', () => {
     const world = new CombatWorld();
-    world.step(1 / 60, { ...noInput(), firing: true }, DUMMY);
-    world.step(1 / 60, { ...noInput(), firing: true }, DUMMY);
+    world.step(1 / 60, { ...noInput(), firing: true });
+    world.step(1 / 60, { ...noInput(), firing: true });
     expect(world.projectiles.count).toBe(1);
   });
 
@@ -56,10 +76,10 @@ describe('CombatWorld', () => {
     const world = new CombatWorld();
     const enemy = world.spawnEnemy(DUMMY, world.player.x + 40, world.player.y);
     enemy.hp = 1;
-    world.step(1 / 60, { ...noInput(), aimX: 1, aimY: 0, firing: true }, DUMMY);
+    world.step(1 / 60, { ...noInput(), aimX: 1, aimY: 0, firing: true });
     // Let the projectile travel to the enemy.
     for (let i = 0; i < 10 && world.enemies.length > 0; i++) {
-      world.step(1 / 60, noInput(), DUMMY);
+      world.step(1 / 60, noInput());
     }
     expect(world.enemies).toHaveLength(0);
     expect(world.events.enemyDied.length + world.events.hits.length).toBeGreaterThan(0);
@@ -69,7 +89,7 @@ describe('CombatWorld', () => {
     const world = new CombatWorld();
     const { x: px, y: py } = world.player;
     const target = { x: px + 100, y: py };
-    world.step(1 / 60, { ...noInput(), skillCasts: [{ skillId: POWER_BOLT.id, targetX: target.x, targetY: target.y }] }, DUMMY);
+    world.step(1 / 60, { ...noInput(), skillCasts: [{ skillId: POWER_BOLT.id, targetX: target.x, targetY: target.y }] });
     expect(world.projectiles.count).toBe(1);
     expect(world.projectiles.vx[0]).toBeGreaterThan(0);
     expect(world.projectiles.damage[0]).toBe(POWER_BOLT.damage);
@@ -82,8 +102,8 @@ describe('CombatWorld', () => {
   it('drops a skill cast request while the skill is on cooldown', () => {
     const world = new CombatWorld();
     const cast = { skillId: POWER_BOLT.id, targetX: world.player.x + 100, targetY: world.player.y };
-    world.step(1 / 60, { ...noInput(), skillCasts: [cast] }, DUMMY);
-    world.step(1 / 60, { ...noInput(), skillCasts: [cast] }, DUMMY);
+    world.step(1 / 60, { ...noInput(), skillCasts: [cast] });
+    world.step(1 / 60, { ...noInput(), skillCasts: [cast] });
     expect(world.projectiles.count).toBe(1);
   });
 
@@ -91,7 +111,7 @@ describe('CombatWorld', () => {
     const world = new CombatWorld();
     const enemy = world.spawnEnemy(DUMMY, world.player.x + 200, world.player.y);
     enemy.fireCooldown = 0;
-    world.step(1 / 60, noInput(), DUMMY);
+    world.step(1 / 60, noInput());
     const enemyShotIndex = world.projectiles.count - 1;
     expect(world.projectiles.prevX[enemyShotIndex]).toBe(enemy.x);
     expect(world.projectiles.prevY[enemyShotIndex]).toBe(enemy.y);
@@ -99,24 +119,101 @@ describe('CombatWorld', () => {
 
   it('ignores a cast request for an unknown skill id', () => {
     const world = new CombatWorld();
-    world.step(1 / 60, { ...noInput(), skillCasts: [{ skillId: 'not_a_skill', targetX: 0, targetY: 0 }] }, DUMMY);
+    world.step(1 / 60, { ...noInput(), skillCasts: [{ skillId: 'not_a_skill', targetX: 0, targetY: 0 }] });
     expect(world.projectiles.count).toBe(0);
   });
 
-  it('keeps the player within arena bounds', () => {
-    const world = new CombatWorld();
+  it('keeps the player within the zone\'s elliptical bounds', () => {
+    const zone = makeZone();
+    const world = new CombatWorld(zone);
     for (let i = 0; i < 500; i++) {
-      world.step(1 / 60, { ...noInput(), moveX: -1, moveY: -1 }, DUMMY);
+      world.step(1 / 60, { ...noInput(), moveX: -1, moveY: -1 });
     }
-    expect(world.player.x).toBeGreaterThanOrEqual(PLAYER_TUNING.radius - 1e-6);
-    expect(world.player.y).toBeGreaterThanOrEqual(PLAYER_TUNING.radius - 1e-6);
+    const { centerX, centerY, radiusX, radiusY } = zone.bounds;
+    const r = PLAYER_TUNING.radius;
+    const dx = (world.player.x - centerX) / (radiusX - r);
+    const dy = (world.player.y - centerY) / (radiusY - r);
+    expect(dx * dx + dy * dy).toBeLessThanOrEqual(1 + 1e-6);
   });
 
   it('never exceeds pool capacity even under sustained fire', () => {
     const world = new CombatWorld();
     for (let i = 0; i < 2000; i++) {
-      world.step(1 / 60, { ...noInput(), firing: true, aimX: Math.random(), aimY: Math.random() }, DUMMY);
+      world.step(1 / 60, { ...noInput(), firing: true, aimX: Math.random(), aimY: Math.random() });
     }
     expect(world.projectiles.count).toBeLessThanOrEqual(WORLD_TUNING.projectileCapacity);
+  });
+
+  it('blocks player movement into a static obstacle', () => {
+    const zone = makeZone({ obstacles: [{ x: 40, y: 0, radius: 20 }], playerSpawn: { x: 0, y: 0 } });
+    const world = new CombatWorld(zone);
+    for (let i = 0; i < 120; i++) {
+      world.step(1 / 60, { ...noInput(), moveX: 1, moveY: 0 });
+    }
+    const dist = Math.hypot(world.player.x - 40, world.player.y);
+    expect(dist).toBeGreaterThanOrEqual(20 + PLAYER_TUNING.radius - 1e-6);
+  });
+
+  it('destroys a projectile that hits a static obstacle instead of passing through', () => {
+    const zone = makeZone({ obstacles: [{ x: 50, y: 0, radius: 15 }], playerSpawn: { x: 0, y: 0 } });
+    const world = new CombatWorld(zone);
+    const enemy = world.spawnEnemy(DUMMY, 100, 0); // directly behind the obstacle
+    enemy.hp = 1;
+    world.step(1 / 60, { ...noInput(), aimX: 1, aimY: 0, firing: true });
+    for (let i = 0; i < 10; i++) world.step(1 / 60, noInput());
+    expect(world.enemies).toHaveLength(1);
+    expect(world.enemies[0]!.hp).toBe(1);
+    expect(world.projectiles.count).toBe(0);
+  });
+
+  it('canSpawnMore respects maxAlive and stops once the zone is cleared', () => {
+    const zone = makeZone({ maxAlive: 2, killsToClear: 1 });
+    const world = new CombatWorld(zone);
+    expect(world.canSpawnMore()).toBe(true);
+    world.spawnEnemy(DUMMY, 10, 0);
+    world.spawnEnemy(DUMMY, 20, 0);
+    expect(world.canSpawnMore()).toBe(false);
+  });
+
+  it('flags zoneCleared exactly on the tick the kill quota reaches zero', () => {
+    const zone = makeZone({ killsToClear: 1 });
+    const world = new CombatWorld(zone);
+    const enemy = world.spawnEnemy(DUMMY, 30, 0);
+    enemy.hp = 1;
+
+    // Spawning and hitting can both happen within the same fixed step
+    // (a fast projectile can integrate far enough to hit on the tick it's
+    // fired), so the event has to be checked after every step from the
+    // very first one, not just in a follow-up loop.
+    let sawZoneCleared = false;
+    world.step(1 / 60, { ...noInput(), aimX: 1, aimY: 0, firing: true });
+    sawZoneCleared ||= world.events.zoneCleared;
+    for (let i = 0; i < 10 && !sawZoneCleared; i++) {
+      world.step(1 / 60, noInput());
+      sawZoneCleared ||= world.events.zoneCleared;
+    }
+    expect(sawZoneCleared).toBe(true);
+    expect(world.killsRemaining).toBe(0);
+    expect(world.isZoneCleared).toBe(true);
+    expect(world.canSpawnMore()).toBe(false);
+  });
+
+  it("loadZone resets enemies, projectiles, and the kill counter, and repositions/heals the player", () => {
+    const zoneA = makeZone({ killsToClear: 5, playerSpawn: { x: 0, y: 0 } });
+    const zoneB = makeZone({ id: 'zone-b', killsToClear: 8, playerSpawn: { x: 500, y: 500 } });
+    const world = new CombatWorld(zoneA);
+    world.spawnEnemy(DUMMY, 10, 10);
+    world.player.hp = 1;
+    world.step(1 / 60, { ...noInput(), firing: true });
+
+    world.loadZone(zoneB);
+
+    expect(world.currentZone).toBe(zoneB);
+    expect(world.killsRemaining).toBe(8);
+    expect(world.enemies).toHaveLength(0);
+    expect(world.projectiles.count).toBe(0);
+    expect(world.player.x).toBe(500);
+    expect(world.player.y).toBe(500);
+    expect(world.player.hp).toBe(world.player.maxHp);
   });
 });

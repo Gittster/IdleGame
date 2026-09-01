@@ -1,6 +1,6 @@
 ---
 name: art-zone
-description: Drafts a style-consistent image-generation prompt for a zone's ground texture and scatter props (rocks, ruins, dead trees, etc.), given a verbal description or reference image of the zone. Use when the user wants art for a new zone/biome/environment, or asks to design what a zone looks like visually. Does not call an image API itself — hands back a prompt to run in the user's own tool (Midjourney, ChatGPT, etc.), then use the art-import skill on the result.
+description: Drafts a style-consistent image-generation prompt (or a hand-drawn-sketch trace, per the style guide's sketch-first path) for a zone's obstacles and scatter props, given a verbal description or reference image of the zone. Use when the user wants art for a new zone/biome/environment, or asks to design what a zone looks like visually. Does not call an image API itself — hands back a prompt to run in the user's own tool (Midjourney, ChatGPT, etc.), then use the art-import skill on the result.
 ---
 
 # Zone Art Prompt Drafting
@@ -12,26 +12,27 @@ be consistent with its palette, direction, and technical specs — don't
 improvise a different style or color set even if the user's verbal
 description doesn't mention one.
 
-## The key constraint: this produces a tileable texture, not a scene painting
+## The key constraint: zones are small, bounded set-pieces, not an open arena
 
-`CombatScene` follows the player across a large arena
-(`WORLD_TUNING.arenaWidth`/`Height`, currently 3200×3200) — there is no
-single fixed-size backdrop that could cover that. A zone's visual
-identity comes from:
+Each zone (`ZoneDef` in `src/data/zones.ts`) is its own small elliptical
+play space with a fixed number of monsters and a kill-quota that unlocks
+the next zone — not a single continuous world the camera roams freely
+across. That changes what art a zone actually needs:
 
-1. **One seamless, tileable ground texture** repeated across the arena floor.
-2. **Several scatter props** (rocks, ruined pillars, dead trees, bones —
-   whatever fits the zone's theme) placed as individual transparent-
-   background sprites, procedurally scattered across the ground by game
-   code.
+1. **The ground itself needs no image asset at all.** It's drawn as a
+   flat `groundColor` fill with an `outlineColor` stroke, defined right
+   on the `ZoneDef` — literally just two colors, no texture to generate
+   or tile.
+2. **Obstacles** (a rock, a fallen log — anything that should physically
+   block movement, per `CircleObstacle`) and **scatter props** (purely
+   decorative dressing) are the actual art surface for a zone: individual
+   transparent-background subjects, same treatment as a character sprite.
 
 If the user describes a zone as a "scene" (e.g. "a ruined temple
 courtyard with a big broken statue in the center"), translate that into
-this ground-texture + props model rather than prompting for a single
-illustrated scene — call out the translation explicitly so they can
-redirect if they actually pictured something else (e.g. a bounded arena
-with a fixed backdrop would be a different, bigger engineering change,
-not just an art request).
+this flat-ground + obstacles/props model — the broken statue becomes an
+obstacle, other set dressing becomes props — rather than prompting for a
+single illustrated backdrop image.
 
 ## What to ask if the verbal prompt is thin
 
@@ -39,8 +40,14 @@ A one-line theme ("a swamp zone") is enough to start, but a noticeably
 better result comes from knowing:
 
 - **Biome/theme** — swamp, ruins, crypt, frozen wastes, etc.
-- **2-3 signature props** specific to this zone (not just "some rocks") —
-  what would make a player recognize this zone from a screenshot?
+- **Ground/outline colors** — a `groundColor` + `outlineColor` pair for
+  the `ZoneDef` (from the style guide's palette, §2c) — this is the only
+  "environment" decision that isn't an image asset.
+- **1-2 obstacles** — solid, movement-blocking shapes (a rock, a fallen
+  log) that fit the theme.
+- **2-3 signature scatter props** specific to this zone (purely
+  decorative) — what would make a player recognize this zone from a
+  screenshot?
 - **Any specific monster family** that lives here (affects environment
   storytelling — bones/webs/nests matching whatever's about to attack the
   player) — check `src/data/monsters.ts` for what's already defined.
@@ -50,24 +57,25 @@ state the assumptions, and let the user correct them.
 
 ## Drafting the prompt
 
-Produce two things:
+Produce prompts for the obstacle(s) and scatter props — no ground
+texture prompt is needed (see above). Two sourcing paths, per the style
+guide's §1a:
 
-1. **One ground texture prompt.** Must explicitly state:
-   - "seamless tileable texture, no visible seams, repeating pattern"
-   - top-down, flat-ish read (a ground texture is looked at nearly
-     straight down, unlike character/prop art's elevated angle)
-   - the environment palette from the style guide (§2c), named as hex
-     values in the prompt is fine and often helps
-   - 512×512, PNG, no transparency
-
-2. **2-4 prop prompts**, one per signature prop. Each must state:
-   - single object, centered, fully isolated
-   - transparent background (explicitly say "transparent background, no
-     ground, no shadow baked in" — image generators default to putting
-     objects on some kind of ground/context otherwise)
-   - the elevated top-down angle from the style guide (§3), matching
-     character/enemy art rather than the flat ground texture
-   - 256×256 or 512×512 PNG per the style guide
+- **Sketch-first (default):** if the user hands you a hand-drawn
+  reference, trace/clean it directly into a hand-authored SVG or Graphics
+  shape (or a cleaned raster PNG) yourself — no external tool needed, skip
+  straight to `art-import` if it's already a raster.
+- **Prompt-drafting (Path B):** for each obstacle/prop, write one
+  complete, copy-pasteable paragraph prompt that states:
+  - single object, centered, fully isolated
+  - transparent background (explicitly say "transparent background, no
+    ground, no shadow baked in" — image generators default to putting
+    objects on some kind of ground/context otherwise)
+  - the elevated top-down angle from the style guide (§3), matching
+    character/enemy art
+  - the crude/naive hand-drawn-but-crisp direction from the style guide
+    (§1/§1a) — thick black outline, flat solid fill, no gradients/shading
+  - 256×256 or 512×512 PNG per the style guide
 
 Write each prompt as a single, complete, copy-pasteable paragraph — not
 a bullet list the user has to reassemble. Show them to the user directly

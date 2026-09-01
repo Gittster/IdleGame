@@ -131,7 +131,8 @@ came from different games.
 | Asset type | Canvas | Format | Notes |
 |---|---|---|---|
 | Character / enemy sprite | 256×256, subject centered with ~10% padding | PNG, alpha transparency | One pose. Background fully transparent, not white/checkerboard. |
-| Zone ground texture | 512×512, **seamlessly tileable** | PNG, no transparency | Repeats across a large open arena (`WORLD_TUNING.arenaWidth/Height` — currently 3200×3200) — this is a texture, not a scene painting. Explicitly prompt for "seamless tileable texture." |
+| Zone ground | n/a — flat fill color + outline, drawn with Phaser Graphics | n/a | Zones are small, bounded set-pieces (an elliptical play space, not an open roaming arena), so the ground is a solid `groundColor` fill with an `outlineColor` stroke defined directly on the `ZoneDef` (see `src/data/zones.ts`) rather than an image asset. No ground texture needs to be generated or imported. |
+| Zone obstacle (e.g. a rock) | Same solid-fill-plus-outline treatment as the ground, or a simple imported sprite for a more detailed shape | PNG, alpha transparency (if imported) | Obstacles are solid — they block movement and destroy projectiles (see `CircleObstacle` in `zoneGeometry.ts`) — so their art should read as clearly impassable. |
 | Zone prop / doodad (rocks, dead trees, ruins) | 256×256 or 512×512, subject centered | PNG, alpha transparency | Scattered procedurally across a zone — same "one object, transparent background" treatment as a character. |
 
 ## 5. Folder conventions

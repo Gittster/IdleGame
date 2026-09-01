@@ -3,9 +3,11 @@ import { PLAYER_TUNING, WORLD_TUNING, BASIC_ATTACK_TUNING } from './tuning';
 import { ProjectilePool } from './projectilePool';
 import { SpatialHash } from './spatialHash';
 import { sweptCircleHitsCircle } from './collision';
+import { clampToEllipse, pushOutOfCircle } from './zoneGeometry';
 import { createPlayer, createEnemy, type PlayerState, type EnemyState } from './entities';
 import type { MonsterDef } from '../../data/monsters';
 import { SKILLS } from '../../data/skills';
+import { FIRST_ZONE, type ZoneDef } from '../../data/zones';
 
 export interface HitEvent {
   x: number;
@@ -31,12 +33,15 @@ export class FrameEvents {
   readonly enemyDied: EnemyState[] = [];
   readonly skillCasts: SkillCastEvent[] = [];
   readonly fired: { x: number; y: number; team: Team }[] = [];
+  /** True only on the tick the zone's kill quota hits zero. */
+  zoneCleared = false;
 
   clear(): void {
     this.hits.length = 0;
     this.enemyDied.length = 0;
     this.skillCasts.length = 0;
     this.fired.length = 0;
+    this.zoneCleared = false;
   }
 }
 
@@ -46,13 +51,45 @@ export class CombatWorld {
   readonly projectiles: ProjectilePool;
   readonly events = new FrameEvents();
 
+  currentZone: ZoneDef;
+  killsRemaining: number;
+
   private readonly enemyHash: SpatialHash;
   private readonly neighborBuf: number[] = [];
 
-  constructor() {
-    this.player = createPlayer(WORLD_TUNING.arenaWidth / 2, WORLD_TUNING.arenaHeight / 2, PLAYER_TUNING.maxHp);
+  constructor(zone: ZoneDef = FIRST_ZONE) {
+    this.currentZone = zone;
+    this.killsRemaining = zone.killsToClear;
+    this.player = createPlayer(zone.playerSpawn.x, zone.playerSpawn.y, PLAYER_TUNING.maxHp);
     this.projectiles = new ProjectilePool(WORLD_TUNING.projectileCapacity);
     this.enemyHash = new SpatialHash(WORLD_TUNING.hashCellSize);
+  }
+
+  get isZoneCleared(): boolean {
+    return this.killsRemaining <= 0;
+  }
+
+  canSpawnMore(): boolean {
+    return !this.isZoneCleared && this.enemies.length < this.currentZone.maxAlive;
+  }
+
+  /** Resets sim state for a new zone: clears enemies/projectiles, moves
+   *  the player to the new zone's spawn point (healed, as a checkpoint),
+   *  and resets the kill quota. Used on a zone-clear transition. */
+  loadZone(zone: ZoneDef): void {
+    this.currentZone = zone;
+    this.killsRemaining = zone.killsToClear;
+    this.enemies.length = 0;
+    this.projectiles.clear();
+
+    const p = this.player;
+    p.x = zone.playerSpawn.x;
+    p.y = zone.playerSpawn.y;
+    p.prevX = p.x;
+    p.prevY = p.y;
+    p.vx = 0;
+    p.vy = 0;
+    p.hp = p.maxHp;
   }
 
   spawnEnemy(def: MonsterDef, x: number, y: number): EnemyState {
@@ -67,14 +104,25 @@ export class CombatWorld {
     this.enemies.pop();
   }
 
-  step(dt: number, input: InputFrame, enemyDef: MonsterDef): void {
+  step(dt: number, input: InputFrame): void {
     this.events.clear();
     this.stepPlayerMovement(dt, input);
     this.stepPlayerAttack(dt, input);
     this.stepPlayerSkills(dt, input);
-    this.stepEnemies(dt, enemyDef);
+    this.stepEnemies(dt);
     this.projectiles.integrate(dt);
     this.resolveCollisions();
+  }
+
+  private resolveObstacles(x: number, y: number, radius: number): { x: number; y: number } {
+    let px = x;
+    let py = y;
+    for (const obstacle of this.currentZone.obstacles) {
+      const pushed = pushOutOfCircle(px, py, radius, obstacle);
+      px = pushed.x;
+      py = pushed.y;
+    }
+    return { x: px, y: py };
   }
 
   private stepPlayerMovement(dt: number, input: InputFrame): void {
@@ -98,8 +146,13 @@ export class CombatWorld {
     p.y += p.vy * dt;
 
     const r = PLAYER_TUNING.radius;
-    p.x = clamp(p.x, r, WORLD_TUNING.arenaWidth - r);
-    p.y = clamp(p.y, r, WORLD_TUNING.arenaHeight - r);
+    const clamped = clampToEllipse(p.x, p.y, this.currentZone.bounds, r);
+    p.x = clamped.x;
+    p.y = clamped.y;
+
+    const pushed = this.resolveObstacles(p.x, p.y, r);
+    p.x = pushed.x;
+    p.y = pushed.y;
   }
 
   private stepPlayerAttack(dt: number, input: InputFrame): void {
@@ -165,7 +218,8 @@ export class CombatWorld {
     }
   }
 
-  private stepEnemies(dt: number, def: MonsterDef): void {
+  private stepEnemies(dt: number): void {
+    const def = this.currentZone.monster;
     for (const e of this.enemies) {
       e.prevX = e.x;
       e.prevY = e.y;
@@ -176,6 +230,13 @@ export class CombatWorld {
         e.y += e.knockbackY * dt;
         e.knockbackX *= 0.86;
         e.knockbackY *= 0.86;
+
+        const clamped = clampToEllipse(e.x, e.y, this.currentZone.bounds, e.radius);
+        e.x = clamped.x;
+        e.y = clamped.y;
+        const pushed = this.resolveObstacles(e.x, e.y, e.radius);
+        e.x = pushed.x;
+        e.y = pushed.y;
       } else {
         e.knockbackX = 0;
         e.knockbackY = 0;
@@ -216,6 +277,7 @@ export class CombatWorld {
 
     const pool = this.projectiles;
     for (let i = pool.count - 1; i >= 0; i--) {
+      if (this.resolveObstacleHit(i)) continue;
       if (pool.team[i] === Team.Player) {
         this.resolvePlayerProjectile(i);
       } else {
@@ -229,8 +291,37 @@ export class CombatWorld {
         dead.alive = false;
         this.events.enemyDied.push(dead);
         this.removeEnemyAt(i);
+
+        if (this.killsRemaining > 0) {
+          this.killsRemaining--;
+          if (this.killsRemaining === 0) this.events.zoneCleared = true;
+        }
       }
     }
+  }
+
+  /** A projectile that hits static zone geometry is destroyed, no damage
+   *  dealt — the rock blocks shots the same way it blocks movement.
+   *  Returns true if the projectile was consumed. */
+  private resolveObstacleHit(i: number): boolean {
+    const pool = this.projectiles;
+    for (const obstacle of this.currentZone.obstacles) {
+      const hit = sweptCircleHitsCircle(
+        pool.prevX[i]!,
+        pool.prevY[i]!,
+        pool.x[i]!,
+        pool.y[i]!,
+        pool.radius[i]!,
+        obstacle.x,
+        obstacle.y,
+        obstacle.radius
+      );
+      if (hit) {
+        pool.removeAt(i);
+        return true;
+      }
+    }
+    return false;
   }
 
   private resolvePlayerProjectile(i: number): void {
@@ -299,10 +390,6 @@ export class CombatWorld {
     this.events.hits.push({ x: p.x, y: p.y, damage: dmg, target: 'player', killed: p.hp <= 0 });
     pool.removeAt(i);
   }
-}
-
-function clamp(v: number, min: number, max: number): number {
-  return v < min ? min : v > max ? max : v;
 }
 
 function moveToward(current: number, target: number, maxDelta: number): number {

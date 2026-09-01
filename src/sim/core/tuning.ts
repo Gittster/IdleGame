@@ -9,8 +9,6 @@ export const WORLD_TUNING = {
   /** Never simulate more than this many fixed steps in one render frame
    *  (avoids a "spiral of death" after a tab is backgrounded). */
   maxStepsPerFrame: 8,
-  arenaWidth: 3200,
-  arenaHeight: 3200,
   projectileCapacity: 4096,
   /** Spatial hash cell size for enemy broadphase queries. */
   hashCellSize: 96,

@@ -2,8 +2,8 @@ import Phaser from 'phaser';
 import { CombatWorld } from '../../sim/core/combatWorld';
 import { WORLD_TUNING } from '../../sim/core/tuning';
 import { Team, type InputFrame } from '../../sim/core/types';
-import { DUMMY } from '../../data/monsters';
 import { POWER_BOLT } from '../../data/skills';
+import { ZONES, type ZoneDef } from '../../data/zones';
 import type { EnemyState } from '../../sim/core/entities';
 import { InputManager } from '../input/InputManager';
 import { ProjectileRenderer } from '../render/ProjectileRenderer';
@@ -16,6 +16,8 @@ const SKILL_BUTTON_RADIUS = 34;
 const FULLSCREEN_BUTTON_RADIUS = 22;
 const MAX_ENEMY_INDICATORS = 14;
 const INDICATOR_EDGE_MARGIN = 28;
+const OBSTACLE_FILL = 0x8a8578;
+const CAMERA_BOUNDS_PADDING = 60;
 
 export class CombatScene extends Phaser.Scene {
   private world!: CombatWorld;
@@ -23,12 +25,15 @@ export class CombatScene extends Phaser.Scene {
   private projectileRenderer!: ProjectileRenderer;
   private juice!: Juice;
 
+  private zoneGraphics!: Phaser.GameObjects.Graphics;
   private playerSprite!: Phaser.GameObjects.Image;
   private enemySprites = new Map<number, Phaser.GameObjects.Image>();
   private enemyIndicators: Phaser.GameObjects.Image[] = [];
 
   private hpBarFill!: Phaser.GameObjects.Rectangle;
+  private zoneStatusText!: Phaser.GameObjects.Text;
   private debugText!: Phaser.GameObjects.Text;
+  private zoneBanner!: Phaser.GameObjects.Text;
 
   private skillButtonPos = { x: 0, y: 0 };
   private skillButtonContainer!: Phaser.GameObjects.Container;
@@ -53,12 +58,9 @@ export class CombatScene extends Phaser.Scene {
     this.inputs = new InputManager(this);
     this.juice = new Juice(this, 'tex-spark');
 
-    this.add
-      .tileSprite(0, 0, WORLD_TUNING.arenaWidth, WORLD_TUNING.arenaHeight, 'tex-ground')
-      .setOrigin(0, 0)
-      .setDepth(-10);
-
-    this.cameras.main.setBounds(0, 0, WORLD_TUNING.arenaWidth, WORLD_TUNING.arenaHeight);
+    this.zoneGraphics = this.add.graphics().setDepth(-10);
+    this.drawZoneVisuals(this.world.currentZone);
+    this.setCameraBoundsForZone(this.world.currentZone);
 
     this.playerSprite = this.add.image(this.world.player.x, this.world.player.y, 'tex-player').setDepth(10);
     this.cameras.main.startFollow(this.playerSprite, true, 1, 1);
@@ -66,8 +68,8 @@ export class CombatScene extends Phaser.Scene {
     this.projectileRenderer = new ProjectileRenderer(this, 'tex-projectile', WORLD_TUNING.projectileCapacity);
     this.buildEnemyIndicators();
 
-    for (let i = 0; i < GAME_CONFIG.targetEnemyCount; i++) {
-      this.spawnEnemyNear(this.world.player.x, this.world.player.y);
+    for (let i = 0; i < this.world.currentZone.maxAlive; i++) {
+      this.spawnEnemyInZone(this.world.player.x, this.world.player.y);
     }
     this.time.addEvent({
       delay: GAME_CONFIG.enemyRespawnCheckMs,
@@ -81,6 +83,34 @@ export class CombatScene extends Phaser.Scene {
 
     this.input.keyboard!.on('keydown-T', () => this.stressTestBurst());
     this.input.keyboard!.on('keydown-Q', () => this.inputs.requestSkillCast(POWER_BOLT.id));
+  }
+
+  /** Draws the zone's boundary (flat fill + thick outline) and static
+   *  obstacles directly via Graphics — matching the hand-drawn-and-
+   *  cleaned-up art direction in art/STYLE_GUIDE.md without needing an
+   *  image asset. Re-run on zone transitions rather than rebuilt. */
+  private drawZoneVisuals(zone: ZoneDef): void {
+    const g = this.zoneGraphics;
+    g.clear();
+
+    const { centerX, centerY, radiusX, radiusY } = zone.bounds;
+    g.fillStyle(zone.groundColor, 1);
+    g.fillEllipse(centerX, centerY, radiusX * 2, radiusY * 2);
+    g.lineStyle(8, zone.outlineColor, 1);
+    g.strokeEllipse(centerX, centerY, radiusX * 2, radiusY * 2);
+
+    for (const obstacle of zone.obstacles) {
+      g.fillStyle(OBSTACLE_FILL, 1);
+      g.fillCircle(obstacle.x, obstacle.y, obstacle.radius);
+      g.lineStyle(6, zone.outlineColor, 1);
+      g.strokeCircle(obstacle.x, obstacle.y, obstacle.radius);
+    }
+  }
+
+  private setCameraBoundsForZone(zone: ZoneDef): void {
+    const { centerX, centerY, radiusX, radiusY } = zone.bounds;
+    const pad = CAMERA_BOUNDS_PADDING;
+    this.cameras.main.setBounds(centerX - radiusX - pad, centerY - radiusY - pad, (radiusX + pad) * 2, (radiusY + pad) * 2);
   }
 
   /**
@@ -129,6 +159,8 @@ export class CombatScene extends Phaser.Scene {
       this.fullscreenButtonPos = this.fullscreenButtonCenter();
       this.fullscreenButton.setPosition(this.fullscreenButtonPos.x, this.fullscreenButtonPos.y);
     }
+
+    this.zoneBanner.setPosition(this.scale.width / 2, this.scale.height / 2);
   }
 
   /** Right edge, upper-middle of the screen — clear of both the top-right
@@ -137,23 +169,42 @@ export class CombatScene extends Phaser.Scene {
     return { x: this.scale.width - 64, y: this.scale.height * 0.35 };
   }
 
-  private spawnEnemyNear(px: number, py: number): void {
-    const minDist = GAME_CONFIG.minEnemySpawnDistance;
-    let x = 0;
-    let y = 0;
-    for (let attempt = 0; attempt < 10; attempt++) {
-      x = Phaser.Math.Between(DUMMY.radius, WORLD_TUNING.arenaWidth - DUMMY.radius);
-      y = Phaser.Math.Between(DUMMY.radius, WORLD_TUNING.arenaHeight - DUMMY.radius);
-      if (Phaser.Math.Distance.Between(x, y, px, py) >= minDist) break;
+  /** Rejection-samples a point inside the zone's ellipse (shrunk in from
+   *  the boundary a little so nothing spawns hugging the outline). */
+  private randomPointInZone(zone: ZoneDef): { x: number; y: number } {
+    const { centerX, centerY, radiusX, radiusY } = zone.bounds;
+    const rx = radiusX * 0.85;
+    const ry = radiusY * 0.85;
+    for (let attempt = 0; attempt < 20; attempt++) {
+      const x = Phaser.Math.FloatBetween(-1, 1);
+      const y = Phaser.Math.FloatBetween(-1, 1);
+      if (x * x + y * y <= 1) {
+        return { x: centerX + x * rx, y: centerY + y * ry };
+      }
     }
-    const enemy = this.world.spawnEnemy(DUMMY, x, y);
-    const sprite = this.add.image(x, y, 'tex-enemy').setDepth(8);
+    return { x: centerX, y: centerY };
+  }
+
+  private spawnEnemyInZone(avoidX: number, avoidY: number): void {
+    const zone = this.world.currentZone;
+    const minDist = GAME_CONFIG.minEnemySpawnDistance;
+    let point = { x: zone.bounds.centerX, y: zone.bounds.centerY };
+    for (let attempt = 0; attempt < 10; attempt++) {
+      point = this.randomPointInZone(zone);
+      const farEnough = Phaser.Math.Distance.Between(point.x, point.y, avoidX, avoidY) >= minDist;
+      const clearOfObstacles = zone.obstacles.every(
+        (o) => Phaser.Math.Distance.Between(point.x, point.y, o.x, o.y) >= o.radius + zone.monster.radius + 20
+      );
+      if (farEnough && clearOfObstacles) break;
+    }
+    const enemy = this.world.spawnEnemy(zone.monster, point.x, point.y);
+    const sprite = this.add.image(point.x, point.y, 'tex-enemy').setDepth(8);
     this.enemySprites.set(enemy.id, sprite);
   }
 
   private maybeSpawnEnemy(): void {
-    if (this.world.enemies.length < GAME_CONFIG.targetEnemyCount) {
-      this.spawnEnemyNear(this.world.player.x, this.world.player.y);
+    if (this.world.canSpawnMore()) {
+      this.spawnEnemyInZone(this.world.player.x, this.world.player.y);
     }
   }
 
@@ -182,11 +233,16 @@ export class CombatScene extends Phaser.Scene {
     bg.setStrokeStyle(1, 0xffffff, 0.4);
     this.hpBarFill = this.add.rectangle(18, 18, 156, 10, 0x4be36a, 1).setOrigin(0, 0).setScrollFactor(0).setDepth(101);
 
+    this.zoneStatusText = this.add
+      .text(16, 36, '', { ...TEXT_STYLES.heading, fontSize: '14px' })
+      .setScrollFactor(0)
+      .setDepth(100);
+
     const instructions = this.inputs.isTouch
       ? 'left stick: move · right stick: aim & fire\ntap the skill icon, then tap a target'
       : 'WASD move · mouse aim · click/space fire\nQ or click the skill icon to cast at cursor · T = stress test';
     const instructionsText = this.add
-      .text(16, 36, instructions, { ...TEXT_STYLES.bodyMuted, fontSize: '12px' })
+      .text(16, this.zoneStatusText.y + this.zoneStatusText.height + 6, instructions, { ...TEXT_STYLES.bodyMuted, fontSize: '12px' })
       .setScrollFactor(0)
       .setDepth(100);
 
@@ -194,6 +250,13 @@ export class CombatScene extends Phaser.Scene {
       .text(16, instructionsText.y + instructionsText.height + 8, '', { ...TEXT_STYLES.debug, fontSize: '12px' })
       .setScrollFactor(0)
       .setDepth(100);
+
+    this.zoneBanner = this.add
+      .text(this.scale.width / 2, this.scale.height / 2, '', { ...TEXT_STYLES.title, align: 'center' })
+      .setOrigin(0.5)
+      .setScrollFactor(0)
+      .setDepth(300)
+      .setVisible(false);
 
     this.buildSkillButton();
     this.buildFullscreenButton();
@@ -256,7 +319,7 @@ export class CombatScene extends Phaser.Scene {
       firing: this.inputs.firing,
       skillCasts: this.inputs.consumeSkillCasts(),
     };
-    this.world.step(FIXED_DT, frame, DUMMY);
+    this.world.step(FIXED_DT, frame);
     this.handleFrameEvents();
   }
 
@@ -293,6 +356,40 @@ export class CombatScene extends Phaser.Scene {
     for (const fired of events.fired) {
       if (fired.team === Team.Player) this.juice.punchScale(this.playerSprite, 0.18, 70);
     }
+
+    if (events.zoneCleared) this.onZoneCleared();
+  }
+
+  private onZoneCleared(): void {
+    const zone = this.world.currentZone;
+    this.zoneBanner.setText(`${zone.name}\nCleared!`).setVisible(true);
+    this.time.delayedCall(GAME_CONFIG.zoneClearedBannerMs, () => this.advanceZone());
+  }
+
+  private advanceZone(): void {
+    const nextZoneId = this.world.currentZone.nextZoneId;
+    const nextZone = nextZoneId ? ZONES[nextZoneId] : undefined;
+    if (!nextZone) {
+      this.zoneBanner.setText('No further zones yet —\nmore coming soon!');
+      return;
+    }
+    this.transitionToZone(nextZone);
+  }
+
+  private transitionToZone(zone: ZoneDef): void {
+    this.world.loadZone(zone);
+
+    for (const sprite of this.enemySprites.values()) sprite.destroy();
+    this.enemySprites.clear();
+
+    this.drawZoneVisuals(zone);
+    this.setCameraBoundsForZone(zone);
+
+    for (let i = 0; i < zone.maxAlive; i++) {
+      this.spawnEnemyInZone(this.world.player.x, this.world.player.y);
+    }
+
+    this.zoneBanner.setVisible(false);
   }
 
   private render(alpha: number): void {
@@ -392,6 +489,10 @@ export class CombatScene extends Phaser.Scene {
     const hpRatio = Phaser.Math.Clamp(p.hp / p.maxHp, 0, 1);
     this.hpBarFill.width = 156 * hpRatio;
     this.hpBarFill.fillColor = hpRatio > 0.35 ? 0x4be36a : 0xe3564b;
+
+    const zone = this.world.currentZone;
+    const killsLeft = Math.max(0, this.world.killsRemaining);
+    this.zoneStatusText.setText(`${zone.name} — ${killsLeft} kill${killsLeft === 1 ? '' : 's'} remaining`);
 
     const remaining = p.skillCooldowns[POWER_BOLT.id] ?? 0;
     if (remaining > 0) {

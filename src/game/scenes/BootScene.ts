@@ -22,7 +22,6 @@ export class BootScene extends Phaser.Scene {
     this.makeCircleTexture('tex-projectile', BASIC_ATTACK_TUNING.projectileRadius, 0xffffff, 0xffffff);
     this.makeCircleTexture('tex-spark', 3, 0xffffff, 0xffffff);
     this.makeIndicatorTexture();
-    this.makeGroundTile();
 
     this.waitForFonts().then(() => this.scene.start('Combat'));
   }
@@ -79,17 +78,6 @@ export class BootScene extends Phaser.Scene {
     g.fillCircle(size / 2, size / 2, radius);
     g.strokeCircle(size / 2, size / 2, radius);
     g.generateTexture(key, size, size);
-    g.destroy();
-  }
-
-  private makeGroundTile(): void {
-    const size = 64;
-    const g = this.add.graphics();
-    g.fillStyle(0x14141c, 1);
-    g.fillRect(0, 0, size, size);
-    g.lineStyle(1, 0x22222e, 1);
-    g.strokeRect(0, 0, size, size);
-    g.generateTexture('tex-ground', size, size);
     g.destroy();
   }
 }
