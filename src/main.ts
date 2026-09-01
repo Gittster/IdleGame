@@ -1,4 +1,12 @@
 import Phaser from 'phaser';
+// Self-hosted (via Fontsource) rather than a Google Fonts CDN link: no
+// third-party font-host dependency for players, and the exact weights the
+// theme uses (see src/game/ui/theme.ts) — Vite bundles the woff2 files and
+// injects the @font-face rules from these CSS imports.
+import '@fontsource/cinzel/700.css';
+import '@fontsource/spectral/400.css';
+import '@fontsource/spectral/600.css';
+import '@fontsource/spectral/700.css';
 import { BootScene } from './game/scenes/BootScene';
 import { CombatScene } from './game/scenes/CombatScene';
 

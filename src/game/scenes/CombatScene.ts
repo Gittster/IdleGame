@@ -9,6 +9,7 @@ import { InputManager } from '../input/InputManager';
 import { ProjectileRenderer } from '../render/ProjectileRenderer';
 import { Juice } from '../render/Juice';
 import { GAME_CONFIG } from '../config';
+import { TEXT_STYLES } from '../ui/theme';
 
 const FIXED_DT = WORLD_TUNING.fixedDtMs / 1000;
 const SKILL_BUTTON_RADIUS = 34;
@@ -185,12 +186,12 @@ export class CombatScene extends Phaser.Scene {
       ? 'left stick: move · right stick: aim & fire\ntap the skill icon, then tap a target'
       : 'WASD move · mouse aim · click/space fire\nQ or click the skill icon to cast at cursor · T = stress test';
     const instructionsText = this.add
-      .text(16, 36, instructions, { fontSize: '12px', color: '#ffffffaa' })
+      .text(16, 36, instructions, { ...TEXT_STYLES.bodyMuted, fontSize: '12px' })
       .setScrollFactor(0)
       .setDepth(100);
 
     this.debugText = this.add
-      .text(16, instructionsText.y + instructionsText.height + 8, '', { fontSize: '12px', color: '#9be89b' })
+      .text(16, instructionsText.y + instructionsText.height + 8, '', { ...TEXT_STYLES.debug, fontSize: '12px' })
       .setScrollFactor(0)
       .setDepth(100);
 
@@ -203,9 +204,7 @@ export class CombatScene extends Phaser.Scene {
 
     const ring = this.add.circle(0, 0, SKILL_BUTTON_RADIUS, 0x000000, 0.35).setStrokeStyle(2, 0xffffff, 0.4);
     this.skillIcon = this.add.circle(0, 0, SKILL_BUTTON_RADIUS - 6, POWER_BOLT.tint, 0.95);
-    this.skillCooldownText = this.add
-      .text(0, 0, '', { fontSize: '16px', color: '#ffffff', fontStyle: 'bold' })
-      .setOrigin(0.5);
+    this.skillCooldownText = this.add.text(0, 0, '', TEXT_STYLES.numeric).setOrigin(0.5);
 
     this.skillButtonContainer = this.add
       .container(this.skillButtonPos.x, this.skillButtonPos.y, [ring, this.skillIcon, this.skillCooldownText])
@@ -217,7 +216,7 @@ export class CombatScene extends Phaser.Scene {
     if (!this.sys.game.device.fullscreen.available) return;
     this.fullscreenButtonPos = this.fullscreenButtonCenter();
     this.fullscreenButton = this.add
-      .text(this.fullscreenButtonPos.x, this.fullscreenButtonPos.y, '⛶', { fontSize: '22px', color: '#ffffffcc' })
+      .text(this.fullscreenButtonPos.x, this.fullscreenButtonPos.y, '⛶', { ...TEXT_STYLES.body, fontSize: '22px', shadow: undefined })
       .setOrigin(0.5)
       .setScrollFactor(0)
       .setDepth(150);

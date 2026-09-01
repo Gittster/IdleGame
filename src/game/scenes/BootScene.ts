@@ -1,5 +1,6 @@
 import Phaser from 'phaser';
 import { BASIC_ATTACK_TUNING } from '../../sim/core/tuning';
+import { REQUIRED_FONT_FACES } from '../ui/theme';
 
 /**
  * Generates all placeholder ("programmer art") textures procedurally so the
@@ -23,7 +24,23 @@ export class BootScene extends Phaser.Scene {
     this.makeIndicatorTexture();
     this.makeGroundTile();
 
-    this.scene.start('Combat');
+    this.waitForFonts().then(() => this.scene.start('Combat'));
+  }
+
+  /**
+   * Canvas text (what every Phaser Text object draws with) renders with
+   * whatever font is loaded *at that instant* — it won't retroactively
+   * redraw if a webfont finishes downloading after the fact. So the
+   * Combat scene, and the HUD text it builds on the first frame, has to
+   * wait for the real fonts to be ready; otherwise every label
+   * permanently locks in the browser's fallback serif. A short timeout
+   * keeps a slow/blocked font request from hanging the game forever —
+   * worst case it just boots with the fallback font that one time.
+   */
+  private async waitForFonts(): Promise<void> {
+    const loads = REQUIRED_FONT_FACES.map((spec) => document.fonts.load(spec).catch(() => undefined));
+    const timeout = new Promise<void>((resolve) => setTimeout(resolve, 3000));
+    await Promise.race([Promise.all(loads), timeout]);
   }
 
   /** A small arrow pointing along local +x, used to mark the direction of
