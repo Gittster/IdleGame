@@ -2,3 +2,8 @@ node_modules
 dist
 .DS_Store
 *.log
+
+# Raw AI-generated dumps before import — see art/STYLE_GUIDE.md. Prompt
+# logs (art/prompts/) and processed assets (public/art/) ARE tracked.
+art/incoming/*
+!art/incoming/.gitkeep

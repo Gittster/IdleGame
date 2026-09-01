@@ -89,7 +89,7 @@ The important shape: **Combat → materials/blueprints → Smithing/Alchemy/Cons
 
 ## 8. Open Questions
 
-- Art style *within* the top-down PoE-style camera: pixel art, hand-drawn, or flat/vector? This decides the whole Phaser sprite/animation pipeline.
-- Placeholder/programmer art for now with real art later, or block on art before building systems?
+- ~~Art style *within* the top-down PoE-style camera: pixel art, hand-drawn, or flat/vector?~~ Given a working default in `art/STYLE_GUIDE.md` (painted dark fantasy, semi-realistic) — not a hand-drawn typeface-style final decision, just a concrete direction to iterate against instead of an open blank.
+- Placeholder/programmer art for now with real art later, or block on art before building systems? Current answer: placeholder now, replaced incrementally per-asset via the `art-zone`/`art-character`/`art-enemy`/`art-import` skills as real art gets generated — not blocking.
 - Any monetization, or purely a personal/free project? (Affects how aggressively prestige currencies etc. need pacing.)
 - Preferred active-vs-idle balance — should skilled active play meaningfully outpace idling, or should it mainly be about *convenience* (not needing to click)?
