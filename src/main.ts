@@ -28,3 +28,17 @@ const game = new Phaser.Game({
 if (import.meta.env.DEV) {
   (window as unknown as { __game: Phaser.Game }).__game = game;
 }
+
+// Mobile Safari/Chrome fire 'orientationchange' before window.innerWidth/
+// innerHeight have actually settled on the new orientation's values — read
+// them immediately and RESIZE mode's canvas ends up sized for the *old*
+// orientation, which reads as the game being cut off top/bottom (or left/
+// right) after rotating. Re-measuring a few times over the following
+// half-second, rather than trusting the first post-event reading, is the
+// standard workaround for that race.
+window.addEventListener('orientationchange', () => {
+  for (const delay of [0, 100, 300, 600]) {
+    setTimeout(() => game.scale.resize(window.innerWidth, window.innerHeight), delay);
+  }
+});
+

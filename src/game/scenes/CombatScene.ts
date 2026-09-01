@@ -117,15 +117,19 @@ export class CombatScene extends Phaser.Scene {
    *  RESIZE scale mode means scale.width/height genuinely change, unlike
    *  the old fixed-resolution FIT setup. */
   private repositionHud(): void {
-    const x = this.scale.width - 64;
-    const y = this.scale.height - 64;
-    this.skillButtonPos = { x, y };
-    this.skillButtonContainer.setPosition(x, y);
+    this.skillButtonPos = this.skillButtonCenter();
+    this.skillButtonContainer.setPosition(this.skillButtonPos.x, this.skillButtonPos.y);
 
     if (this.fullscreenButton) {
       this.fullscreenButtonPos = this.fullscreenButtonCenter();
       this.fullscreenButton.setPosition(this.fullscreenButtonPos.x, this.fullscreenButtonPos.y);
     }
+  }
+
+  /** Right edge, upper-middle of the screen — clear of both the top-right
+   *  fullscreen toggle and the aim joystick's usual lower reach. */
+  private skillButtonCenter(): { x: number; y: number } {
+    return { x: this.scale.width - 64, y: this.scale.height * 0.35 };
   }
 
   private spawnEnemyNear(px: number, py: number): void {
@@ -191,9 +195,7 @@ export class CombatScene extends Phaser.Scene {
   }
 
   private buildSkillButton(): void {
-    const x = this.scale.width - 64;
-    const y = this.scale.height - 64;
-    this.skillButtonPos = { x, y };
+    this.skillButtonPos = this.skillButtonCenter();
 
     const ring = this.add.circle(0, 0, SKILL_BUTTON_RADIUS, 0x000000, 0.35).setStrokeStyle(2, 0xffffff, 0.4);
     this.skillIcon = this.add.circle(0, 0, SKILL_BUTTON_RADIUS - 6, POWER_BOLT.tint, 0.95);
@@ -202,7 +204,7 @@ export class CombatScene extends Phaser.Scene {
       .setOrigin(0.5);
 
     this.skillButtonContainer = this.add
-      .container(x, y, [ring, this.skillIcon, this.skillCooldownText])
+      .container(this.skillButtonPos.x, this.skillButtonPos.y, [ring, this.skillIcon, this.skillCooldownText])
       .setScrollFactor(0)
       .setDepth(149);
   }
